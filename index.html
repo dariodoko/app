@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Glazbeni dnevnik</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="auth-shell" id="authShell">
+    <section class="auth-panel">
+      <div class="auth-panel-copy">
+        <p class="eyebrow">Prijava</p>
+        <h2 id="authTitle">Prijavi se u glazbeni dnevnik</h2>
+        <p class="auth-copy">
+          Svaki korisnik ima svoj racun, svoje nastupe, financije i opremu.
+        </p>
+      </div>
+      <form id="authForm" class="form-grid">
+        <label class="auth-label full-width">
+          <span class="auth-label-text">Email</span>
+          <input type="email" id="authEmail" placeholder="Enter your email address" required>
+        </label>
+        <label class="auth-label full-width">
+          <span class="auth-label-text">Lozinka</span>
+          <input type="password" id="authPassword" placeholder="Enter your password" required>
+        </label>
+        <div class="full-width auth-actions">
+          <button type="submit" id="authSubmitButton" class="primary-button">Prijava</button>
+          <button type="button" id="authToggleMode" class="ghost-button">Nemam racun</button>
+        </div>
+      </form>
+      <p id="authStatus" class="google-calendar-status">Prijavi se za nastavak.</p>
+      <div class="auth-footer">
+        <span>Osobni dnevnik glazbenika</span>
+        <span>Siguran pristup tvojim nastupima i financijama</span>
+      </div>
+    </section>
+  </div>
+
+  <div class="app-shell hidden" id="appShell">
+    <section class="user-bar">
+      <div>
+        <p class="eyebrow">Korisnicki racun</p>
+        <strong id="currentUserEmail">-</strong>
+      </div>
+      <div class="user-bar-actions">
+        <button type="button" id="seedDemoButton" class="ghost-button small-button">Demo podaci</button>
+        <button type="button" id="logoutButton" class="danger-button small-button">Odjava</button>
+      </div>
+    </section>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Osobni dnevnik glazbenika</p>
+        <h1>Pregled nastupa, zarade i opreme na jednom mjestu.</h1>
+        <p class="hero-copy">
+          Vodi osobnu evidenciju po bendu, prati avanse i naplate te biljezi kupnju i prodaju opreme bez kompliciranih tablica.
+        </p>
+      </div>
+      <div class="hero-stats">
+        <article>
+          <span id="heroGigCount">0</span>
+          <p>Nastupa upisano</p>
+        </article>
+        <article>
+          <span id="heroRevenue">0 EUR</span>
+          <p>Ukupna zarada</p>
+        </article>
+        <article>
+          <span id="heroEquipment">0 EUR</span>
+          <p>Neto oprema</p>
+        </article>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Glavna navigacija">
+      <button class="tab-button active" data-tab="nastupi">Nastupi</button>
+      <button class="tab-button" data-tab="financije">Financije</button>
+      <button class="tab-button" data-tab="oprema">Instrumenti i oprema</button>
+    </nav>
+
+    <main>
+      <section class="tab-panel active" id="nastupi">
+        <div class="layout-grid">
+          <section class="panel accent-panel" id="gigComposerSection">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Unos nastupa</p>
+                <h2>Novi zapis u dnevniku</h2>
+              </div>
+            </div>
+
+            <form id="gigForm" class="form-grid">
+              <input type="hidden" id="gigId">
+              <label class="band-field">
+                Bend / projekt
+                <div class="autocomplete">
+                  <input type="text" id="bandName" list="bandSuggestions" placeholder="Unesi ili odaberi bend" autocomplete="off" required>
+                  <div id="bandDropdown" class="autocomplete-menu hidden"></div>
+                </div>
+              </label>
+              <div class="band-save-row">
+                <button type="button" id="saveBandButton" class="ghost-button small-button">Spremi bend</button>
+                <p class="form-hint">Prvo spremi bend u listu bendova, pa onda spremaj nastup.</p>
+              </div>
+              <label>
+                Datum nastupa
+                <input type="date" id="gigDate" required>
+              </label>
+              <label>
+                Vrijeme nastupa
+                <input type="time" id="gigTime">
+              </label>
+              <label>
+                Lokacija nastupa
+                <input type="text" id="gigLocation" placeholder="Grad, klub, event" required>
+              </label>
+              <label>
+                Ugovaratelj
+                <input type="text" id="contractorName" list="contractorSuggestions" placeholder="Ime organizatora ili klijenta" required>
+              </label>
+              <label>
+                Kontakt telefon
+                <input type="text" id="contactPhone" placeholder="Broj telefona za kontakt">
+              </label>
+              <label>
+                Kontakt email
+                <input type="email" id="contactEmail" placeholder="Email za kontakt">
+              </label>
+              <label>
+                Dogovorena cijena
+                <input type="number" id="gigFee" min="0" step="0.01" placeholder="0.00" required>
+              </label>
+              <label>
+                Uplaceni avans
+                <input type="number" id="gigAdvance" min="0" step="0.01" placeholder="0.00" value="0">
+              </label>
+              <label>
+                Nacin placanja
+                <select id="paymentMethod" required>
+                  <option value="Gotovina">Gotovina</option>
+                  <option value="Racun">Racun</option>
+                </select>
+              </label>
+              <label>
+                Tocna zarada
+                <input type="number" id="gigNetEarning" min="0" step="0.01" placeholder="Unos nakon nastupa">
+              </label>
+              <p id="gigNetEarningHint" class="form-hint full-width">
+                Tocna zarada moze se unijeti tek nakon sto datum nastupa prodje.
+              </p>
+              <label class="full-width">
+                Biljeska
+                <textarea id="gigNotes" rows="4" placeholder="Kratka biljeska o svirci, setu, atmosferi ili dogovoru..."></textarea>
+              </label>
+              <div class="full-width form-actions">
+                <button type="submit" id="gigSubmitButton" class="primary-button">Spremi nastup</button>
+                <button type="reset" class="ghost-button">Ocisti formu</button>
+                <button type="button" id="gigCancelEditButton" class="ghost-button hidden">Odustani od uredjivanja</button>
+              </div>
+            </form>
+
+            <section class="saved-bands full-width" aria-labelledby="savedBandsTitle">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Spremljeni bendovi</p>
+                  <h3 id="savedBandsTitle">Uredi listu bendova</h3>
+                </div>
+              </div>
+              <div id="savedBandsList" class="saved-bands-list empty-state">
+                Jos nema spremljenih bendova.
+              </div>
+            </section>
+
+            <datalist id="bandSuggestions"></datalist>
+            <datalist id="contractorSuggestions"></datalist>
+          </section>
+
+          <section class="panel" id="calendarSection">
+            <div class="section-heading inline-actions">
+              <div>
+                <p class="eyebrow">Kalendar</p>
+                <h2>Mjesecni pregled nastupa</h2>
+              </div>
+              <div class="month-switcher">
+                <button id="prevMonth" class="icon-button" type="button" aria-label="Prethodni mjesec">&lt;</button>
+                <strong id="calendarLabel"></strong>
+                <button id="nextMonth" class="icon-button" type="button" aria-label="Sljedeci mjesec">&gt;</button>
+              </div>
+            </div>
+            <div class="calendar-weekdays">
+              <span>Pon</span>
+              <span>Uto</span>
+              <span>Sri</span>
+              <span>Cet</span>
+              <span>Pet</span>
+              <span>Sub</span>
+              <span>Ned</span>
+            </div>
+            <div id="calendarGrid" class="calendar-grid"></div>
+
+            <section class="google-calendar-panel" aria-labelledby="googleCalendarTitle">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Google Calendar</p>
+                  <h3 id="googleCalendarTitle">Povezi Google racun</h3>
+                </div>
+              </div>
+              <div class="google-calendar-grid">
+                <div class="full-width google-client-lock">
+                  Google Calendar koristi zajednicki OAuth klijent aplikacije.
+                </div>
+                <label class="full-width">
+                  Kalendar
+                  <select id="googleCalendarSelect">
+                    <option value="primary">Primary calendar</option>
+                  </select>
+                </label>
+              </div>
+              <p class="form-hint">
+                Aplikacija samo cita nastupe iz tvog Google Kalendara. Nista iz ove aplikacije ne mijenja Google evente.
+              </p>
+              <p id="googleCalendarStatus" class="google-calendar-status">
+                Google Calendar nije povezan.
+              </p>
+              <div class="form-actions">
+                <button type="button" id="googleConnectButton" class="primary-button">Povezi Google Calendar</button>
+                <button type="button" id="googleDisconnectButton" class="ghost-button">Odspoji</button>
+                <button type="button" id="googleImportButton" class="ghost-button">Ucitaj nastupe</button>
+              </div>
+            </section>
+          </section>
+        </div>
+
+      </section>
+
+      <section class="tab-panel" id="financije">
+        <div class="layout-grid finances-grid">
+          <section class="panel" id="financeSummarySection">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Sazetak</p>
+                <h2>Zarada po razdoblju</h2>
+              </div>
+            </div>
+            <div class="metric-grid">
+              <article class="metric-card">
+                <span>Ovaj tjedan</span>
+                <strong id="weeklyRevenue">0 EUR</strong>
+              </article>
+              <article class="metric-card">
+                <span>Ovaj mjesec</span>
+                <strong id="monthlyRevenue">0 EUR</strong>
+              </article>
+              <article class="metric-card">
+                <span>Ova godina</span>
+                <strong id="yearlyRevenue">0 EUR</strong>
+              </article>
+              <article class="metric-card highlight">
+                <span>Ukupno svi nastupi</span>
+                <strong id="totalRevenue">0 EUR</strong>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Naplate</p>
+                <h2>Pregled po nacinu placanja</h2>
+              </div>
+            </div>
+            <div class="metric-grid">
+              <article class="metric-card">
+                <span>Gotovina</span>
+                <strong id="cashRevenue">0 EUR</strong>
+              </article>
+              <article class="metric-card">
+                <span>Racun</span>
+                <strong id="bankRevenue">0 EUR</strong>
+              </article>
+              <article class="metric-card">
+                <span>Ukupno avansa</span>
+                <strong id="totalAdvance">0 EUR</strong>
+              </article>
+              <article class="metric-card">
+                <span>Prosjek po nastupu</span>
+                <strong id="averageRevenue">0 EUR</strong>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel" id="financeBreakdownSection">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Zarada po mjesecima</p>
+                <h2>Mjesecna statistika</h2>
+            </div>
+          </div>
+          <div id="monthlyBreakdown" class="breakdown-table empty-state">
+            Financijski pregled ce se pojaviti nakon prvog upisa nastupa.
+          </div>
+        </section>
+
+        <section class="panel" id="financeBandsSection">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Pregled po bendu</p>
+              <h2>Svirke i zarada po bendovima</h2>
+            </div>
+          </div>
+          <div id="bandBreakdown" class="breakdown-table empty-state">
+            Pregled po bendovima ce se pojaviti nakon prvog upisa nastupa.
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="oprema">
+        <div class="layout-grid">
+          <section class="panel accent-panel" id="equipmentFormSection">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Instrumenti i oprema</p>
+                <h2>Unos kupnje i prodaje</h2>
+              </div>
+            </div>
+            <form id="equipmentForm" class="form-grid">
+              <input type="hidden" id="equipmentId">
+              <label>
+                Datum
+                <input type="date" id="equipmentDate" required>
+              </label>
+              <label>
+                Tip unosa
+                <select id="equipmentType" required>
+                  <option value="Kupljeno">Kupljeno</option>
+                  <option value="Prodano">Prodano</option>
+                </select>
+              </label>
+              <label class="full-width">
+                Oprema / instrument
+                <input type="text" id="equipmentName" placeholder="Npr. Fender Precision Bass" required>
+              </label>
+              <label>
+                Cijena
+                <input type="number" id="equipmentPrice" min="0" step="0.01" placeholder="0.00" required>
+              </label>
+              <label class="full-width">
+                Biljeska
+                <textarea id="equipmentNotes" rows="3" placeholder="Stanje, kupac, servis, detalji oglasa..."></textarea>
+              </label>
+              <div class="full-width form-actions">
+                <button type="submit" id="equipmentSubmitButton" class="primary-button">Spremi opremu</button>
+                <button type="reset" class="ghost-button">Ocisti formu</button>
+                <button type="button" id="equipmentCancelEditButton" class="ghost-button hidden">Odustani od uredjivanja</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel" id="equipmentSummarySection">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Rezime opreme</p>
+                <h2>Kupnja i prodaja</h2>
+              </div>
+            </div>
+            <div class="metric-grid">
+              <article class="metric-card">
+                <span>Kupljeno ukupno</span>
+                <strong id="equipmentBought">0 EUR</strong>
+              </article>
+              <article class="metric-card">
+                <span>Prodano ukupno</span>
+                <strong id="equipmentSold">0 EUR</strong>
+              </article>
+              <article class="metric-card highlight">
+                <span>Neto rezultat</span>
+                <strong id="equipmentNet">0 EUR</strong>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel" id="equipmentListSection">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Povijest opreme</p>
+              <h2>Svi unosi</h2>
+            </div>
+          </div>
+          <div id="equipmentList" class="card-list empty-state">
+            Jos nema unosa opreme.
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-shell hidden" id="gigDiaryModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-diary="true"></div>
+    <section class="modal-panel diary-modal-panel" role="dialog" aria-modal="true" aria-labelledby="gigDiaryTitle">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Dnevnik nastupa</p>
+          <h2 id="gigDiaryTitle">Pregled svih nastupa</h2>
+        </div>
+        <button type="button" id="gigDiaryCloseButton" class="icon-button" aria-label="Zatvori dnevnik">&times;</button>
+      </div>
+      <div class="diary-modal-layout">
+        <div id="gigDiaryList" class="diary-list empty-state">Jos nema upisanih nastupa.</div>
+        <div id="gigDiaryDetail" class="diary-detail empty-state">Odaberi nastup za detalje.</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+  <script async defer src="https://accounts.google.com/gsi/client" onload="googleIdentityLoaded()"></script>
+</body>
+</html>

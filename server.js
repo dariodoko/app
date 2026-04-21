@@ -26,7 +26,16 @@ const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || "Gazza Manager";
 const SESSION_COOKIE = "glazbeni_dnevnik_session";
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "app-data.json");
-const PUBLIC_FILES = new Set(["/index.html", "/style.css", "/app.js", "/logo.jpg"]);
+const PUBLIC_FILES = new Set([
+  "/index.html",
+  "/style.css",
+  "/app.js",
+  "/logo.jpg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/manifest.webmanifest",
+  "/service-worker.js",
+]);
 let mailTransporter = null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -1159,6 +1168,8 @@ function getContentType(extension) {
       return "application/javascript; charset=utf-8";
     case ".json":
       return "application/json; charset=utf-8";
+    case ".webmanifest":
+      return "application/manifest+json; charset=utf-8";
     case ".png":
       return "image/png";
     case ".jpg":

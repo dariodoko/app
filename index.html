@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gazza manager</title>
+  <meta name="theme-color" content="#171b23">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Gazza Manager">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -151,6 +158,21 @@
 
       <main>
       <section class="tab-panel active" id="nastupi">
+        <section class="panel gig-search-panel" aria-labelledby="homeGigSearchTitle">
+          <div class="section-heading compact-heading">
+            <div>
+              <p class="eyebrow">Pretraga</p>
+              <h3 id="homeGigSearchTitle">Brza pretraga nastupa</h3>
+            </div>
+          </div>
+          <div class="diary-search-row diary-search-row-home">
+            <input type="search" id="homeGigSearchInput" placeholder="Pretrazi po bendu, lokaciji, ugovaratelju, kontaktu, napomeni ili datumu">
+          </div>
+          <div id="homeGigSearchResults" class="home-gig-results empty-state">
+            Upisi pojam za pretragu nastupa.
+          </div>
+        </section>
+
         <section class="panel" id="calendarSection">
           <div class="section-heading inline-actions">
             <div>
@@ -256,6 +278,13 @@
               Uplaceni avans
               <input type="number" id="gigAdvance" min="0" step="0.01" placeholder="0.00" value="0">
             </label>
+            <label class="receipt-toggle">
+              <span>Ispis potvrde o avansu</span>
+              <div class="checkbox-row">
+                <input type="checkbox" id="gigPrintAdvanceReceipt">
+                <span>Nakon spremanja otvori A4 potvrdu za PDF ispis</span>
+              </div>
+            </label>
             <label>
               Nacin placanja
               <select id="paymentMethod" required>
@@ -276,22 +305,11 @@
             </label>
             <div class="full-width form-actions">
               <button type="submit" id="gigSubmitButton" class="primary-button">Spremi nastup</button>
+              <button type="button" id="gigPrintReceiptButton" class="ghost-button">Ispisi potvrdu avansa</button>
               <button type="reset" class="ghost-button">Ocisti formu</button>
               <button type="button" id="gigCancelEditButton" class="ghost-button hidden">Odustani od uredjivanja</button>
             </div>
           </form>
-
-          <section class="saved-bands full-width" aria-labelledby="savedBandsTitle">
-            <div class="section-heading compact-heading">
-              <div>
-                <p class="eyebrow">Spremljeni bendovi</p>
-                <h3 id="savedBandsTitle">Uredi listu bendova</h3>
-              </div>
-            </div>
-            <div id="savedBandsList" class="saved-bands-list empty-state">
-              Jos nema spremljenih bendova.
-            </div>
-          </section>
 
           <datalist id="bandSuggestions"></datalist>
           <datalist id="contractorSuggestions"></datalist>
@@ -478,7 +496,7 @@
         <section class="section-intro">
           <div>
             <p class="eyebrow">Moj profil</p>
-            <h2>Korisnicki panel i pristup aplikaciji.</h2>
+            <h2>KORISNIČKI PANEL</h2>
             <p class="hero-copy">Pregledaj aktivni racun, status workspacea i osnovne informacije vezane uz tvoj profil.</p>
           </div>
         </section>
@@ -618,6 +636,9 @@
           <h2 id="gigDiaryTitle">Pregled svih nastupa</h2>
         </div>
         <button type="button" id="gigDiaryCloseButton" class="icon-button" aria-label="Zatvori dnevnik">&times;</button>
+      </div>
+      <div class="diary-search-row">
+        <input type="search" id="gigSearchInput" placeholder="Pretrazi po bendu, lokaciji, ugovaratelju, kontaktu, napomeni ili datumu">
       </div>
       <div class="diary-modal-layout">
         <div id="gigDiaryList" class="diary-list empty-state">Jos nema upisanih nastupa.</div>

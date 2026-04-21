@@ -32,6 +32,7 @@ const DEFAULT_BAND_DIRECTORY = [
 let state = structuredClone(initialState);
 let authMode = "login";
 let activeGigDiaryId = null;
+let gigSearchQuery = "";
 const GOOGLE_OAUTH_STORAGE_KEY = "glazbeni_dnevnik_google_oauth";
 
 const elements = {
@@ -76,6 +77,9 @@ const elements = {
   gigDiaryCloseButton: document.getElementById("gigDiaryCloseButton"),
   gigDiaryList: document.getElementById("gigDiaryList"),
   gigDiaryDetail: document.getElementById("gigDiaryDetail"),
+  gigSearchInput: document.getElementById("gigSearchInput"),
+  homeGigSearchInput: document.getElementById("homeGigSearchInput"),
+  homeGigSearchResults: document.getElementById("homeGigSearchResults"),
   logoutButton: document.getElementById("logoutButton"),
   seedDemoButton: document.getElementById("seedDemoButton"),
   tabs: [...document.querySelectorAll(".tab-button")],
@@ -83,6 +87,7 @@ const elements = {
   gigForm: document.getElementById("gigForm"),
   gigId: document.getElementById("gigId"),
   gigSubmitButton: document.getElementById("gigSubmitButton"),
+  gigPrintReceiptButton: document.getElementById("gigPrintReceiptButton"),
   gigCancelEditButton: document.getElementById("gigCancelEditButton"),
   equipmentForm: document.getElementById("equipmentForm"),
   equipmentId: document.getElementById("equipmentId"),
@@ -91,11 +96,12 @@ const elements = {
   bandSuggestions: document.getElementById("bandSuggestions"),
   bandName: document.getElementById("bandName"),
   bandDropdown: document.getElementById("bandDropdown"),
-  savedBandsList: document.getElementById("savedBandsList"),
   contractorSuggestions: document.getElementById("contractorSuggestions"),
   gigDate: document.getElementById("gigDate"),
   gigNetEarning: document.getElementById("gigNetEarning"),
   gigNetEarningHint: document.getElementById("gigNetEarningHint"),
+  gigAdvance: document.getElementById("gigAdvance"),
+  gigPrintAdvanceReceipt: document.getElementById("gigPrintAdvanceReceipt"),
   gigList: document.getElementById("gigList"),
   equipmentList: document.getElementById("equipmentList"),
   calendarGrid: document.getElementById("calendarGrid"),
@@ -120,9 +126,11 @@ const googleCalendarRuntime = {
 boot();
 
 async function boot() {
+  registerServiceWorker();
   bindEvents();
   setDefaultDates();
   syncGigNetEarningAvailability();
+  syncAdvanceReceiptAvailability();
   renderAuthMode();
 
   const sessionResponse = await api("/api/auth/me");
@@ -139,6 +147,8 @@ function bindEvents() {
   elements.authToggleMode.addEventListener("click", toggleAuthMode);
   elements.quickMenuToggle?.addEventListener("click", toggleQuickMenu);
   elements.gigDiaryCloseButton?.addEventListener("click", closeGigDiaryModal);
+  elements.gigSearchInput?.addEventListener("input", handleGigSearchInput);
+  elements.homeGigSearchInput?.addEventListener("input", handleGigSearchInput);
   elements.logoutButton.addEventListener("click", handleLogout);
   elements.seedDemoButton?.addEventListener("click", handleSeedDemo);
 
@@ -153,8 +163,10 @@ function bindEvents() {
   elements.profilePrimaryBandInput?.addEventListener("click", () => renderBandDropdown(elements.profilePrimaryBandInput.value, "profile"));
   elements.profilePrimaryBandInput?.addEventListener("input", () => renderBandDropdown(elements.profilePrimaryBandInput.value, "profile"));
   elements.gigDate.addEventListener("input", syncGigNetEarningAvailability);
+  elements.gigAdvance?.addEventListener("input", syncAdvanceReceiptAvailability);
 
   elements.gigForm.addEventListener("submit", handleGigSubmit);
+  elements.gigPrintReceiptButton?.addEventListener("click", handleAdvanceReceiptPrint);
   elements.gigCancelEditButton.addEventListener("click", resetGigForm);
   elements.equipmentForm.addEventListener("submit", handleEquipmentSubmit);
   elements.equipmentCancelEditButton.addEventListener("click", resetEquipmentForm);
@@ -333,7 +345,7 @@ function render() {
   renderGoogleCalendarControls();
   renderHeroStats();
   renderSuggestions();
-  renderSavedBands();
+  renderHomeGigSearchResults();
   renderGigDiary();
   renderCalendar();
   renderFinanceSummary();
@@ -356,6 +368,7 @@ function handleDocumentClick(event) {
   const deleteGigButton = event.target.closest("[data-delete-gig]");
   const editEquipmentButton = event.target.closest("[data-edit-equipment]");
   const deleteEquipmentButton = event.target.closest("[data-delete-equipment]");
+  const homeSearchResult = event.target.closest("[data-home-search-gig]");
   const clickedQuickMenu = event.target.closest("#quickMenuPanel, #quickMenuToggle");
   const clickedDiary = event.target.closest("#gigDiaryModal .modal-panel, #gigDiaryModal .modal-backdrop");
 
@@ -381,6 +394,11 @@ function handleDocumentClick(event) {
 
   if (diaryRow) {
     setActiveGigDiary(diaryRow.dataset.diaryGig);
+    return;
+  }
+
+  if (homeSearchResult) {
+    openGigDiaryModal(homeSearchResult.dataset.homeSearchGig);
     return;
   }
 
@@ -435,6 +453,7 @@ function handleDocumentClick(event) {
 async function handleGigSubmit(event) {
   event.preventDefault();
   const bandName = elements.bandName.value.trim();
+  const shouldPrintAdvanceReceipt = elements.gigPrintAdvanceReceipt?.checked;
 
   const payload = {
     bandName,
@@ -452,21 +471,27 @@ async function handleGigSubmit(event) {
   };
 
   try {
+    let savedGig;
     if (elements.gigId.value) {
       const updated = await api(`/api/gigs/${elements.gigId.value}`, {
         method: "PUT",
         body: payload,
       });
-      state.gigs = state.gigs.map((gig) => (gig.id === updated.id ? normalizeGig(updated) : gig));
+      savedGig = normalizeGig(updated);
+      state.gigs = state.gigs.map((gig) => (gig.id === savedGig.id ? savedGig : gig));
     } else {
       const created = await api("/api/gigs", {
         method: "POST",
         body: payload,
       });
-      state.gigs.unshift(normalizeGig(created));
+      savedGig = normalizeGig(created);
+      state.gigs.unshift(savedGig);
     }
 
     await refreshBandData();
+    if (shouldPrintAdvanceReceipt && savedGig?.advance > 0) {
+      openAdvanceReceiptPrint(savedGig);
+    }
     resetGigForm();
     render();
   } catch (error) {
@@ -489,14 +514,27 @@ function startGigEdit(gigId) {
   document.getElementById("contactPhone").value = gig.contactPhone || "";
   document.getElementById("contactEmail").value = gig.contactEmail || "";
   document.getElementById("gigFee").value = gig.fee;
-  document.getElementById("gigAdvance").value = gig.advance;
+  elements.gigAdvance.value = gig.advance;
   document.getElementById("paymentMethod").value = gig.paymentMethod;
   document.getElementById("gigNotes").value = gig.notes || "";
   syncGigNetEarningAvailability();
+  syncAdvanceReceiptAvailability();
   elements.gigNetEarning.value = gig.netEarning == null ? "" : gig.netEarning;
   elements.gigSubmitButton.textContent = "Spremi izmjene";
   elements.gigCancelEditButton.classList.remove("hidden");
   elements.gigForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || window.location.protocol !== "http:" && window.location.protocol !== "https:") {
+    return;
+  }
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {
+      // PWA support is optional; ignore registration failures silently.
+    });
+  }, { once: true });
 }
 
 function resetGigForm() {
@@ -504,9 +542,23 @@ function resetGigForm() {
   elements.gigId.value = "";
   setDefaultDates();
   syncGigNetEarningAvailability();
+  syncAdvanceReceiptAvailability();
+  if (elements.gigPrintAdvanceReceipt) {
+    elements.gigPrintAdvanceReceipt.checked = false;
+  }
   elements.gigSubmitButton.textContent = "Spremi nastup";
   elements.gigCancelEditButton.classList.add("hidden");
   hideBandDropdown();
+}
+
+function handleAdvanceReceiptPrint() {
+  const gig = buildGigFromForm();
+  if (gig.advance <= 0) {
+    window.alert("Upisi iznos avansa veci od 0 za ispis potvrde.");
+    return;
+  }
+
+  openAdvanceReceiptPrint(gig);
 }
 
 async function handleGigDelete(gigId) {
@@ -655,39 +707,6 @@ function hideBandDropdown(target = null) {
 function isSavedBandName(name) {
   const normalized = name.trim().toLocaleLowerCase("hr");
   return Boolean(normalized) && getCombinedBandDirectory().some((band) => band.trim().toLocaleLowerCase("hr") === normalized);
-}
-
-function renderSavedBands() {
-  const personalBandsByName = new Map(
-    state.bands.map((band) => [band.name.trim().toLocaleLowerCase("hr"), band]),
-  );
-  const visibleBands = getCombinedBandDirectory()
-    .map((name) => ({
-      name,
-      personal: personalBandsByName.get(name.trim().toLocaleLowerCase("hr")) || null,
-    }));
-
-  if (!visibleBands.length) {
-    elements.savedBandsList.className = "saved-bands-list empty-state";
-    elements.savedBandsList.textContent = "Jos nema spremljenih bendova.";
-    return;
-  }
-
-  const markup = visibleBands.map((band) => `
-    <article class="saved-band-item">
-      <div>
-        <strong>${escapeHtml(band.name)}</strong>
-        <span class="saved-band-meta">${band.personal ? "U tvom profilu" : "Dostupno u prijedlozima"}</span>
-      </div>
-      <div class="saved-band-actions">
-        ${band.personal ? `<button type="button" class="ghost-button small-button" data-edit-band="${band.personal.id}">Uredi</button>
-        <button type="button" class="danger-button small-button" data-delete-band="${band.personal.id}">Obrisi</button>` : ""}
-      </div>
-    </article>
-  `).join("");
-
-  elements.savedBandsList.className = "saved-bands-list";
-  elements.savedBandsList.innerHTML = markup;
 }
 
 async function handleBandRename(bandId) {
@@ -1363,6 +1382,13 @@ function handleQuickMenuAction(button) {
 }
 
 function renderGigDiary() {
+  if (elements.gigSearchInput && elements.gigSearchInput.value !== gigSearchQuery) {
+    elements.gigSearchInput.value = gigSearchQuery;
+  }
+  if (elements.homeGigSearchInput && elements.homeGigSearchInput.value !== gigSearchQuery) {
+    elements.homeGigSearchInput.value = gigSearchQuery;
+  }
+
   if (!state.gigs.length) {
     activeGigDiaryId = null;
     elements.gigDiaryList.className = "diary-list empty-state";
@@ -1372,13 +1398,23 @@ function renderGigDiary() {
     return;
   }
 
-  const hasActiveGig = state.gigs.some((gig) => gig.id === activeGigDiaryId);
+  const visibleGigs = getFilteredGigs();
+  if (!visibleGigs.length) {
+    activeGigDiaryId = null;
+    elements.gigDiaryList.className = "diary-list empty-state";
+    elements.gigDiaryList.textContent = "Nema nastupa koji odgovaraju ovoj pretrazi.";
+    elements.gigDiaryDetail.className = "diary-detail empty-state";
+    elements.gigDiaryDetail.textContent = "Promijeni pojam pretrage za prikaz detalja.";
+    return;
+  }
+
+  const hasActiveGig = visibleGigs.some((gig) => gig.id === activeGigDiaryId);
   if (!hasActiveGig) {
-    activeGigDiaryId = state.gigs[0].id;
+    activeGigDiaryId = visibleGigs[0].id;
   }
 
   elements.gigDiaryList.className = "diary-list";
-  elements.gigDiaryList.innerHTML = state.gigs.map((gig) => `
+  elements.gigDiaryList.innerHTML = visibleGigs.map((gig) => `
     <button type="button" class="diary-list-item ${gig.id === activeGigDiaryId ? "active" : ""}" data-diary-gig="${gig.id}">
       <strong>${escapeHtml(gig.bandName)}</strong>
       <span>${formatFullDate(gig.date)}${gig.time ? ` u ${gig.time}` : ""}</span>
@@ -1386,7 +1422,7 @@ function renderGigDiary() {
     </button>
   `).join("");
 
-  const activeGig = state.gigs.find((gig) => gig.id === activeGigDiaryId);
+  const activeGig = visibleGigs.find((gig) => gig.id === activeGigDiaryId);
   if (!activeGig) {
     elements.gigDiaryDetail.className = "diary-detail empty-state";
     elements.gigDiaryDetail.textContent = "Odaberi nastup za detalje.";
@@ -1458,6 +1494,78 @@ function setActiveGigDiary(gigId) {
   renderGigDiary();
 }
 
+function handleGigSearchInput(event) {
+  gigSearchQuery = event.target.value.trim();
+  if (elements.gigSearchInput && event.target !== elements.gigSearchInput) {
+    elements.gigSearchInput.value = gigSearchQuery;
+  }
+  if (elements.homeGigSearchInput && event.target !== elements.homeGigSearchInput) {
+    elements.homeGigSearchInput.value = gigSearchQuery;
+  }
+  renderHomeGigSearchResults();
+  renderGigDiary();
+}
+
+function getFilteredGigs() {
+  const normalizedQuery = gigSearchQuery.trim().toLocaleLowerCase("hr");
+  if (!normalizedQuery) {
+    return state.gigs;
+  }
+
+  return state.gigs.filter((gig) => {
+    const searchable = [
+      gig.bandName,
+      gig.location,
+      gig.contractor,
+      gig.contactPhone,
+      gig.contactEmail,
+      gig.notes,
+      gig.paymentMethod,
+      gig.date,
+      formatFullDate(gig.date),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase("hr");
+
+    return searchable.includes(normalizedQuery);
+  });
+}
+
+function renderHomeGigSearchResults() {
+  if (!elements.homeGigSearchResults) {
+    return;
+  }
+
+  if (!state.gigs.length) {
+    elements.homeGigSearchResults.className = "home-gig-results empty-state";
+    elements.homeGigSearchResults.textContent = "Jos nema upisanih nastupa.";
+    return;
+  }
+
+  if (!gigSearchQuery.trim()) {
+    elements.homeGigSearchResults.className = "home-gig-results empty-state";
+    elements.homeGigSearchResults.textContent = "Upisi pojam za pretragu nastupa.";
+    return;
+  }
+
+  const visibleGigs = getFilteredGigs();
+  if (!visibleGigs.length) {
+    elements.homeGigSearchResults.className = "home-gig-results empty-state";
+    elements.homeGigSearchResults.textContent = "Nema nastupa koji odgovaraju ovoj pretrazi.";
+    return;
+  }
+
+  elements.homeGigSearchResults.className = "home-gig-results";
+  elements.homeGigSearchResults.innerHTML = visibleGigs.slice(0, 6).map((gig) => `
+    <button type="button" class="home-gig-result" data-home-search-gig="${gig.id}">
+      <strong>${escapeHtml(gig.bandName)}</strong>
+      <span>${formatFullDate(gig.date)}${gig.time ? ` u ${gig.time}` : ""}</span>
+      <span>${escapeHtml(gig.location)}</span>
+    </button>
+  `).join("");
+}
+
 function setDefaultDates() {
   const today = getDateKey(new Date());
   elements.gigDate.value ||= today;
@@ -1485,6 +1593,330 @@ function getGigNetEarningValue() {
   }
   const rawValue = elements.gigNetEarning.value.trim();
   return rawValue ? toAmount(rawValue) : null;
+}
+
+function syncAdvanceReceiptAvailability() {
+  if (!elements.gigPrintReceiptButton) {
+    return;
+  }
+
+  const hasAdvance = toAmount(elements.gigAdvance?.value) > 0;
+  elements.gigPrintReceiptButton.disabled = !hasAdvance;
+}
+
+function buildGigFromForm() {
+  return normalizeGig({
+    id: elements.gigId.value || "",
+    bandName: elements.bandName.value.trim(),
+    date: elements.gigDate.value,
+    time: document.getElementById("gigTime").value,
+    location: document.getElementById("gigLocation").value.trim(),
+    contractor: document.getElementById("contractorName").value.trim(),
+    contactPhone: document.getElementById("contactPhone").value.trim(),
+    contactEmail: document.getElementById("contactEmail").value.trim(),
+    fee: toAmount(document.getElementById("gigFee").value),
+    advance: toAmount(elements.gigAdvance.value),
+    paymentMethod: document.getElementById("paymentMethod").value,
+    netEarning: getGigNetEarningValue(),
+    notes: document.getElementById("gigNotes").value.trim(),
+  });
+}
+
+function openAdvanceReceiptPrint(gig) {
+  const recipientName = [state.user?.firstName, state.user?.lastName].filter(Boolean).join(" ").trim() || state.user?.email || "Primatelj";
+  const title = `Potvrda avansa - ${gig.bandName || "Nastup"}`;
+  const issueDate = new Date().toLocaleDateString("hr-HR");
+  const eventDate = gig.date ? formatFullDate(gig.date) : "-";
+  const eventTime = gig.time || "-";
+  const notesBlock = gig.notes ? `<div class="notes"><strong>Napomena:</strong><p>${escapeHtml(gig.notes)}</p></div>` : "";
+  const logoUrl = `${window.location.origin}/logo.jpg`;
+  const receiptMarkup = `<!DOCTYPE html>
+<html lang="hr">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #14213d;
+      background: #ffffff;
+    }
+    .sheet {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      min-height: 271mm;
+      border: 1px solid #d6dde8;
+      padding: 12mm 11mm 18mm;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 8mm;
+    }
+    .brand {
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #7c889f;
+      margin: 0 0 6px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+    }
+    .meta {
+      text-align: right;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .amount-card {
+      margin: 0 0 8mm;
+      padding: 8mm;
+      border-radius: 14px;
+      background: #f5f7fb;
+      border: 1px solid #dfe6f1;
+    }
+    .amount-label {
+      margin: 0 0 8px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #7c889f;
+    }
+    .amount-value {
+      margin: 0;
+      font-size: 30px;
+      font-weight: 700;
+      color: #c56d48;
+    }
+    .lead {
+      margin: 0 0 8mm;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5mm 6mm;
+      margin-bottom: 8mm;
+    }
+    .item {
+      padding-bottom: 4mm;
+      border-bottom: 1px solid #e3e8f0;
+      break-inside: avoid;
+    }
+    .item span {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #7c889f;
+    }
+    .item strong {
+      font-size: 15px;
+      line-height: 1.35;
+    }
+    .notes {
+      margin-top: 5mm;
+      padding: 6mm;
+      border-radius: 12px;
+      background: #fafbfd;
+      border: 1px solid #e3e8f0;
+      break-inside: avoid;
+    }
+    .notes strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+    .notes p {
+      margin: 0;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8mm;
+      margin-top: 12mm;
+      break-inside: avoid;
+    }
+    .signature-line {
+      padding-top: 10mm;
+      border-top: 1px solid #9aa7bd;
+      font-size: 13px;
+    }
+    .powered-by {
+      position: absolute;
+      right: 11mm;
+      bottom: 6mm;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-top: 3mm;
+      break-inside: avoid;
+    }
+    .powered-by span {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #7c889f;
+      opacity: 0.78;
+    }
+    .powered-by img {
+      width: 92px;
+      height: auto;
+      display: block;
+      object-fit: contain;
+      opacity: 0.5;
+    }
+    @media print {
+      .sheet {
+        border: 0;
+        min-height: 271mm;
+        padding: 0;
+      }
+      .powered-by {
+        right: 4mm;
+        bottom: 3mm;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header class="header">
+      <div>
+        <p class="brand">Gazza Manager</p>
+        <h1>Potvrda o primljenom avansu</h1>
+      </div>
+      <div class="meta">
+        <div>Datum potvrde: <strong>${escapeHtml(issueDate)}</strong></div>
+        <div>Nacin placanja: <strong>${escapeHtml(gig.paymentMethod || "-")}</strong></div>
+      </div>
+    </header>
+
+    <section class="amount-card">
+      <p class="amount-label">Primljeni iznos avansa</p>
+      <p class="amount-value">${escapeHtml(formatCurrency(gig.advance))}</p>
+    </section>
+
+    <p class="lead">
+      Ovom potvrdom potvrduje se da je za nastup <strong>${escapeHtml(gig.bandName || "-")}</strong>
+      zaprimljen avans od ugovaratelja <strong>${escapeHtml(gig.contractor || "-")}</strong>.
+    </p>
+
+    <section class="grid">
+      <div class="item">
+        <span>Primatelj avansa</span>
+        <strong>${escapeHtml(recipientName)}</strong>
+      </div>
+      <div class="item">
+        <span>Ugovaratelj</span>
+        <strong>${escapeHtml(gig.contractor || "-")}</strong>
+      </div>
+      <div class="item">
+        <span>Datum nastupa</span>
+        <strong>${escapeHtml(eventDate)}</strong>
+      </div>
+      <div class="item">
+        <span>Vrijeme nastupa</span>
+        <strong>${escapeHtml(eventTime)}</strong>
+      </div>
+      <div class="item">
+        <span>Lokacija nastupa</span>
+        <strong>${escapeHtml(gig.location || "-")}</strong>
+      </div>
+      <div class="item">
+        <span>Dogovorena cijena</span>
+        <strong>${escapeHtml(formatCurrency(gig.fee))}</strong>
+      </div>
+    </section>
+
+    ${notesBlock}
+
+    <section class="signatures">
+      <div class="signature-line">Potpis primatelja</div>
+      <div class="signature-line">Potpis ugovaratelja</div>
+    </section>
+
+    <div class="powered-by">
+      <span>Powered By:</span>
+      <img src="${escapeAttribute(logoUrl)}" alt="Ctrl Wave logo">
+    </div>
+  </main>
+</body>
+</html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+
+  const cleanup = () => {
+    window.setTimeout(() => {
+      iframe.remove();
+    }, 500);
+  };
+
+  iframe.addEventListener("load", () => {
+    const printWindow = iframe.contentWindow;
+    if (!printWindow) {
+      cleanup();
+      window.alert("Potvrdu nije moguce pripremiti za ispis.");
+      return;
+    }
+
+    const frameDocument = iframe.contentDocument;
+    const logoImage = frameDocument?.querySelector(".powered-by img");
+    const triggerPrint = () => {
+      printWindow.focus();
+      printWindow.addEventListener("afterprint", cleanup, { once: true });
+      window.setTimeout(() => {
+        try {
+          printWindow.print();
+        } catch {
+          cleanup();
+        }
+      }, 150);
+    };
+
+    if (logoImage && !logoImage.complete) {
+      logoImage.addEventListener("load", triggerPrint, { once: true });
+      logoImage.addEventListener("error", triggerPrint, { once: true });
+      return;
+    }
+
+    triggerPrint();
+  }, { once: true });
+
+  document.body.appendChild(iframe);
+
+  const frameDocument = iframe.contentDocument;
+  if (!frameDocument) {
+    cleanup();
+    window.alert("Potvrdu nije moguce pripremiti za ispis.");
+    return;
+  }
+
+  frameDocument.open();
+  frameDocument.write(receiptMarkup);
+  frameDocument.close();
 }
 
 function normalizeGig(gig) {

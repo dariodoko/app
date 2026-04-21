@@ -5,6 +5,7 @@ const initialState = {
     calendarId: "primary",
   },
   bands: [],
+  bandDirectory: [],
   gigs: [],
   equipment: [],
 };
@@ -20,11 +21,35 @@ const elements = {
   authForm: document.getElementById("authForm"),
   authTitle: document.getElementById("authTitle"),
   authEmail: document.getElementById("authEmail"),
+  authFirstName: document.getElementById("authFirstName"),
+  authLastName: document.getElementById("authLastName"),
+  authPhone: document.getElementById("authPhone"),
   authPassword: document.getElementById("authPassword"),
+  authPasswordConfirm: document.getElementById("authPasswordConfirm"),
   authSubmitButton: document.getElementById("authSubmitButton"),
   authToggleMode: document.getElementById("authToggleMode"),
   authStatus: document.getElementById("authStatus"),
-  currentUserEmail: document.getElementById("currentUserEmail"),
+  authRegisterFields: [...document.querySelectorAll(".auth-register-field")],
+  currentUserName: document.getElementById("currentUserName"),
+  currentUserBand: document.getElementById("currentUserBand"),
+  currentUserInitial: document.getElementById("currentUserInitial"),
+  profileUserEmail: document.getElementById("profileUserEmail"),
+  profileForm: document.getElementById("profileForm"),
+  profileStatus: document.getElementById("profileStatus"),
+  deleteAccountButton: document.getElementById("deleteAccountButton"),
+  profileFirstName: document.getElementById("profileFirstName"),
+  profileLastName: document.getElementById("profileLastName"),
+  profileAddress: document.getElementById("profileAddress"),
+  profilePhone: document.getElementById("profilePhone"),
+  profilePrimaryBand: document.getElementById("profilePrimaryBand"),
+  profilePrimaryInstrument: document.getElementById("profilePrimaryInstrument"),
+  profileFirstNameInput: document.getElementById("profileFirstNameInput"),
+  profileLastNameInput: document.getElementById("profileLastNameInput"),
+  profileAddressInput: document.getElementById("profileAddressInput"),
+  profilePhoneInput: document.getElementById("profilePhoneInput"),
+  profilePrimaryBandInput: document.getElementById("profilePrimaryBandInput"),
+  profilePrimaryInstrumentInput: document.getElementById("profilePrimaryInstrumentInput"),
+  hero: document.querySelector(".hero"),
   quickMenuToggle: document.getElementById("quickMenuToggle"),
   quickMenuPanel: document.getElementById("quickMenuPanel"),
   gigDiaryModal: document.getElementById("gigDiaryModal"),
@@ -46,7 +71,6 @@ const elements = {
   bandSuggestions: document.getElementById("bandSuggestions"),
   bandName: document.getElementById("bandName"),
   bandDropdown: document.getElementById("bandDropdown"),
-  saveBandButton: document.getElementById("saveBandButton"),
   savedBandsList: document.getElementById("savedBandsList"),
   contractorSuggestions: document.getElementById("contractorSuggestions"),
   gigDate: document.getElementById("gigDate"),
@@ -96,7 +120,7 @@ function bindEvents() {
   elements.quickMenuToggle?.addEventListener("click", toggleQuickMenu);
   elements.gigDiaryCloseButton?.addEventListener("click", closeGigDiaryModal);
   elements.logoutButton.addEventListener("click", handleLogout);
-  elements.seedDemoButton.addEventListener("click", handleSeedDemo);
+  elements.seedDemoButton?.addEventListener("click", handleSeedDemo);
 
   elements.tabs.forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
@@ -105,7 +129,6 @@ function bindEvents() {
   elements.bandName.addEventListener("focus", () => renderBandDropdown(elements.bandName.value));
   elements.bandName.addEventListener("click", () => renderBandDropdown(elements.bandName.value));
   elements.bandName.addEventListener("input", () => renderBandDropdown(elements.bandName.value));
-  elements.saveBandButton.addEventListener("click", handleBandSave);
   elements.gigDate.addEventListener("input", syncGigNetEarningAvailability);
 
   elements.gigForm.addEventListener("submit", handleGigSubmit);
@@ -117,6 +140,8 @@ function bindEvents() {
   elements.googleConnectButton.addEventListener("click", handleGoogleConnect);
   elements.googleDisconnectButton.addEventListener("click", handleGoogleDisconnect);
   elements.googleImportButton.addEventListener("click", handleGoogleImport);
+  elements.profileForm?.addEventListener("submit", handleProfileSubmit);
+  elements.deleteAccountButton?.addEventListener("click", handleAccountDelete);
 
   elements.prevMonth.addEventListener("click", () => {
     calendarState.month -= 1;
@@ -135,18 +160,41 @@ function bindEvents() {
 
 async function handleAuthSubmit(event) {
   event.preventDefault();
+
+  if (authMode === "register" && !isPasswordStrongEnough(elements.authPassword.value)) {
+    elements.authStatus.textContent = "Lozinka mora imati najmanje 8 znakova i barem jedan broj.";
+    return;
+  }
+
+  if (authMode === "register" && elements.authPassword.value !== elements.authPasswordConfirm.value) {
+    elements.authStatus.textContent = "Lozinke se ne podudaraju.";
+    return;
+  }
+
   const payload = {
     email: elements.authEmail.value.trim(),
     password: elements.authPassword.value,
   };
 
+  if (authMode === "register") {
+    payload.firstName = elements.authFirstName.value.trim();
+    payload.lastName = elements.authLastName.value.trim();
+    payload.phone = elements.authPhone.value.trim();
+  }
+
   try {
     const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-    await api(endpoint, {
+    const result = await api(endpoint, {
       method: "POST",
       body: payload,
     });
-    elements.authStatus.textContent = authMode === "login" ? "Prijava uspjesna." : "Racun je kreiran.";
+    if (authMode === "register") {
+      elements.authStatus.textContent = result?.registrationEmailSent === false
+        ? "Racun je kreiran, ali registracijski email nije poslan. Provjeri SMTP postavke."
+        : "Racun je kreiran.";
+    } else {
+      elements.authStatus.textContent = "Prijava uspjesna.";
+    }
     elements.authPassword.value = "";
     await loadBootstrap();
   } catch (error) {
@@ -164,7 +212,24 @@ function renderAuthMode() {
   elements.authTitle.textContent = isLogin ? "Prijavi se u glazbeni dnevnik" : "Kreiraj novi racun";
   elements.authSubmitButton.textContent = isLogin ? "Prijava" : "Registracija";
   elements.authToggleMode.textContent = isLogin ? "Nemam racun" : "Vec imam racun";
-  elements.authStatus.textContent = isLogin ? "Prijavi se za nastavak." : "Kreiraj racun za svoj dnevnik.";
+  elements.authStatus.textContent = isLogin
+    ? "Prijavi se za nastavak."
+    : "Kreiraj racun za svoj dnevnik. Lozinka mora imati najmanje 8 znakova i barem jedan broj.";
+  elements.authRegisterFields.forEach((field) => field.classList.toggle("hidden", isLogin));
+  elements.authFirstName.required = !isLogin;
+  elements.authLastName.required = !isLogin;
+  elements.authPhone.required = !isLogin;
+  elements.authPasswordConfirm.required = !isLogin;
+  if (isLogin) {
+    elements.authFirstName.value = "";
+    elements.authLastName.value = "";
+    elements.authPhone.value = "";
+    elements.authPasswordConfirm.value = "";
+  }
+}
+
+function isPasswordStrongEnough(password) {
+  return typeof password === "string" && password.length >= 8 && /\d/.test(password);
 }
 
 async function handleLogout() {
@@ -196,6 +261,7 @@ function applyBootstrapState(data) {
     user: data.user,
     settings: data.settings || { clientId: "", calendarId: "primary" },
     bands: Array.isArray(data.bands) ? data.bands : [],
+    bandDirectory: Array.isArray(data.bandDirectory) ? data.bandDirectory : [],
     gigs: Array.isArray(data.gigs) ? data.gigs.map(normalizeGig) : [],
     equipment: Array.isArray(data.equipment) ? data.equipment : [],
   };
@@ -216,7 +282,31 @@ function renderApp() {
 }
 
 function render() {
-  elements.currentUserEmail.textContent = state.user?.email || "-";
+  const activeEmail = state.user?.email || "-";
+  const fullName = [state.user?.firstName, state.user?.lastName].filter(Boolean).join(" ").trim() || activeEmail;
+  const primaryBand = state.user?.primaryBand?.trim() || "Glavni bend nije upisan";
+  const initialSeed = state.user?.firstName || state.user?.email || "G";
+
+  elements.currentUserName.textContent = fullName;
+  elements.currentUserBand.textContent = primaryBand;
+  elements.currentUserInitial.textContent = initialSeed.charAt(0).toUpperCase();
+  if (elements.profileUserEmail) {
+    elements.profileUserEmail.textContent = activeEmail;
+  }
+  if (elements.profileFirstName) {
+    elements.profileFirstName.textContent = state.user?.firstName || "-";
+    elements.profileLastName.textContent = state.user?.lastName || "-";
+    elements.profileAddress.textContent = state.user?.address || "-";
+    elements.profilePhone.textContent = state.user?.phone || "-";
+    elements.profilePrimaryBand.textContent = state.user?.primaryBand || "-";
+    elements.profilePrimaryInstrument.textContent = state.user?.primaryInstrument || "-";
+    elements.profileFirstNameInput.value = state.user?.firstName || "";
+    elements.profileLastNameInput.value = state.user?.lastName || "";
+    elements.profileAddressInput.value = state.user?.address || "";
+    elements.profilePhoneInput.value = state.user?.phone || "";
+    elements.profilePrimaryBandInput.value = state.user?.primaryBand || "";
+    elements.profilePrimaryInstrumentInput.value = state.user?.primaryInstrument || "";
+  }
   renderGoogleCalendarControls();
   renderHeroStats();
   renderSuggestions();
@@ -274,7 +364,7 @@ function handleDocumentClick(event) {
   if (bandOption) {
     elements.bandName.value = bandOption.dataset.bandOption;
     hideBandDropdown();
-    elements.bandName.focus();
+    elements.bandName.blur();
     return;
   }
 
@@ -322,11 +412,6 @@ async function handleGigSubmit(event) {
   event.preventDefault();
   const bandName = elements.bandName.value.trim();
 
-  if (!isSavedBandName(bandName)) {
-    window.alert("Prvo spremi bend u listu bendova pa onda spremi nastup.");
-    return;
-  }
-
   const payload = {
     bandName,
     date: elements.gigDate.value,
@@ -357,31 +442,9 @@ async function handleGigSubmit(event) {
       state.gigs.unshift(normalizeGig(created));
     }
 
-    await refreshBands();
+    await refreshBandData();
     resetGigForm();
     render();
-  } catch (error) {
-    window.alert(error.message);
-  }
-}
-
-async function handleBandSave() {
-  const bandName = elements.bandName.value.trim();
-  if (!bandName) {
-    window.alert("Unesi naziv benda prije spremanja.");
-    elements.bandName.focus();
-    return;
-  }
-
-  try {
-    await api("/api/bands", {
-      method: "POST",
-      body: { name: bandName },
-    });
-    await refreshBands();
-    renderSuggestions();
-    renderSavedBands();
-    renderBandDropdown(bandName);
   } catch (error) {
     window.alert(error.message);
   }
@@ -502,7 +565,7 @@ function renderHeroStats() {
 }
 
 function renderSuggestions() {
-  const bandNames = state.bands.map((band) => band.name);
+  const bandNames = state.bandDirectory.map((band) => band.name);
   const contractors = [...new Set(state.gigs.map((gig) => gig.contractor).filter(Boolean))].sort(localeSort);
 
   elements.bandSuggestions.innerHTML = bandNames.map((band) => `<option value="${escapeHtml(band)}"></option>`).join("");
@@ -511,7 +574,7 @@ function renderSuggestions() {
 
 function renderBandDropdown(query = "") {
   const normalizedQuery = query.trim().toLocaleLowerCase("hr");
-  const matches = state.bands
+  const matches = state.bandDirectory
     .map((band) => band.name)
     .filter((band) => !normalizedQuery || band.toLocaleLowerCase("hr").includes(normalizedQuery));
 
@@ -533,7 +596,7 @@ function hideBandDropdown() {
 
 function isSavedBandName(name) {
   const normalized = name.trim().toLocaleLowerCase("hr");
-  return Boolean(normalized) && state.bands.some((band) => band.name.trim().toLocaleLowerCase("hr") === normalized);
+  return Boolean(normalized) && state.bandDirectory.some((band) => band.name.trim().toLocaleLowerCase("hr") === normalized);
 }
 
 function renderSavedBands() {
@@ -577,12 +640,13 @@ async function handleBandRename(bandId) {
     method: "PUT",
     body: { name: nextBand },
   });
-  await loadBootstrap();
+  await refreshBandData();
+  render();
 }
 
 async function handleBandDelete(bandId) {
   await api(`/api/bands/${bandId}`, { method: "DELETE" });
-  state.bands = state.bands.filter((band) => band.id !== bandId);
+  await refreshBandData();
   render();
 }
 
@@ -1116,14 +1180,77 @@ function setGoogleCalendarStatus(message) {
   elements.googleCalendarStatus.textContent = message;
 }
 
-async function refreshBands() {
+async function refreshBandData() {
   state.bands = await api("/api/bands");
+  state.bandDirectory = await api("/api/band-directory");
 }
 
 function switchTab(tabId) {
   elements.tabs.forEach((button) => button.classList.toggle("active", button.dataset.tab === tabId));
   elements.panels.forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+  elements.hero?.classList.toggle("hidden", tabId !== "nastupi");
   closeQuickMenu();
+}
+
+async function handleProfileSubmit(event) {
+  event.preventDefault();
+
+  const payload = {
+    firstName: elements.profileFirstNameInput.value.trim(),
+    lastName: elements.profileLastNameInput.value.trim(),
+    address: elements.profileAddressInput.value.trim(),
+    phone: elements.profilePhoneInput.value.trim(),
+    primaryBand: elements.profilePrimaryBandInput.value.trim(),
+    primaryInstrument: elements.profilePrimaryInstrumentInput.value.trim(),
+  };
+
+  try {
+    let updatedUser;
+
+    try {
+      updatedUser = await api("/api/profile", {
+        method: "PUT",
+        body: payload,
+      });
+    } catch (error) {
+      // Some environments/proxies reject PUT routes, so retry with POST.
+      if (error.statusCode !== 404 && error.statusCode !== 405) {
+        throw error;
+      }
+
+      updatedUser = await api("/api/profile", {
+        method: "POST",
+        body: payload,
+      });
+    }
+
+    state.user = updatedUser.user;
+    await refreshBandData();
+    elements.profileStatus.textContent = "Podaci su spremljeni.";
+    elements.profileStatus.classList.remove("hidden");
+    render();
+  } catch (error) {
+    elements.profileStatus.textContent = error.message;
+    elements.profileStatus.classList.remove("hidden");
+  }
+}
+
+async function handleAccountDelete() {
+  const confirmed = window.confirm("Jesi siguran da zelis obrisati racun? Ova akcija trajno brise mail adresu i sve tvoje podatke iz aplikacije.");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api("/api/profile", { method: "DELETE" });
+    state = structuredClone(initialState);
+    googleCalendarRuntime.accessToken = null;
+    googleCalendarRuntime.tokenClient = null;
+    renderAuthOnly();
+  } catch (error) {
+    elements.profileStatus.textContent = error.message;
+    elements.profileStatus.classList.remove("hidden");
+  }
 }
 
 function toggleQuickMenu() {
@@ -1203,7 +1330,10 @@ function renderGigDiary() {
     <article class="entry-card entry-card-active">
       <div class="diary-detail-top">
         <span class="pill ${paymentClass}">${isImportedFromGoogle ? "Google import" : activeGig.paymentMethod}</span>
-        <button type="button" class="primary-button small-button" data-diary-edit="${activeGig.id}">Uredi nastup</button>
+        <div class="card-actions">
+          <button type="button" class="primary-button small-button" data-diary-edit="${activeGig.id}">Uredi nastup</button>
+          <button type="button" class="danger-button small-button" data-delete-gig="${activeGig.id}">Obrisi dogadaj</button>
+        </div>
       </div>
       <div class="entry-header">
         <div>
@@ -1436,7 +1566,9 @@ async function api(url, options = {}) {
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : null;
   if (!response.ok) {
-    throw new Error(payload?.error || "Zahtjev nije uspio.");
+    const error = new Error(payload?.error || "Zahtjev nije uspio.");
+    error.statusCode = response.status;
+    throw error;
   }
   return payload;
 }

@@ -3,15 +3,31 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
+let nodemailer = null;
+try {
+  // Optional dependency: app still runs without SMTP configured.
+  nodemailer = require("nodemailer");
+} catch (error) {
+  nodemailer = null;
+}
+
 loadEnvFile();
 
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const SMTP_HOST = process.env.SMTP_HOST || "";
+const SMTP_PORT = Number.parseInt(process.env.SMTP_PORT || "587", 10);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
+const SMTP_USER = process.env.SMTP_USER || "";
+const SMTP_PASS = process.env.SMTP_PASS || "";
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER || "";
+const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || "Gazza Manager";
 const SESSION_COOKIE = "glazbeni_dnevnik_session";
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "app-data.json");
 const PUBLIC_FILES = new Set(["/index.html", "/style.css", "/app.js"]);
+let mailTransporter = null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 ensureDataFile();
@@ -51,6 +67,10 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { user: user ? serializeUser(user) : null });
     }
 
+    if (url.pathname === "/api/mail-status" && request.method === "GET") {
+      return sendJson(response, 200, await getMailStatus());
+    }
+
     if (!session) {
       if (url.pathname.startsWith("/api/")) {
         return sendJson(response, 401, { error: "Prijava je obavezna." });
@@ -77,8 +97,34 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, await getSettings(session.userId));
     }
 
+    if (url.pathname === "/api/mail-test" && request.method === "POST") {
+      const user = await getUserById(session.userId);
+      const sent = await sendTestEmail(user);
+      return sendJson(response, 200, {
+        ok: sent,
+        message: sent
+          ? `Testni email poslan na ${user?.email || "korisnika"}.`
+          : "Testni email nije poslan. Provjeri SMTP postavke i server log.",
+      });
+    }
+
+    if (url.pathname === "/api/profile" && (request.method === "PUT" || request.method === "POST")) {
+      const body = await readJsonBody(request);
+      return sendJson(response, 200, { user: await updateUserProfile(session.userId, body) });
+    }
+
+    if (url.pathname === "/api/profile" && request.method === "DELETE") {
+      await deleteUserAccount(session.userId);
+      response.setHeader("Set-Cookie", buildExpiredSessionCookie(isSecureRequest(request)));
+      return sendJson(response, 200, { ok: true });
+    }
+
     if (url.pathname === "/api/bands" && request.method === "GET") {
       return sendJson(response, 200, await listBands(session.userId));
+    }
+
+    if (url.pathname === "/api/band-directory" && request.method === "GET") {
+      return sendJson(response, 200, await listBandDirectory());
     }
 
     if (url.pathname === "/api/bands" && request.method === "POST") {
@@ -161,16 +207,24 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, HOST, async () => {
-  await ensureDefaultUsers();
   console.log(`Glazbeni dnevnik backend radi na http://${HOST}:${PORT}`);
 });
 
 async function handleRegister(response, body) {
   const email = normalizeEmail(body.email);
   const password = typeof body.password === "string" ? body.password : "";
+  const firstName = asString(body.firstName);
+  const lastName = asString(body.lastName);
+  const phone = asString(body.phone);
+  const primaryBand = asString(body.primaryBand);
+  const primaryInstrument = asString(body.primaryInstrument);
 
-  if (!email || !password) {
-    throw createHttpError(400, "Email i lozinka su obavezni.");
+  if (!email || !password || !firstName || !lastName || !phone) {
+    throw createHttpError(400, "Email, ime, prezime, broj mobitela i lozinka su obavezni.");
+  }
+
+  if (!isPasswordStrongEnough(password)) {
+    throw createHttpError(400, "Lozinka mora imati najmanje 8 znakova i barem jedan broj.");
   }
 
   const data = await readData();
@@ -179,10 +233,23 @@ async function handleRegister(response, body) {
     throw createHttpError(409, "Korisnik s tim emailom vec postoji.");
   }
 
-  const userId = await createUser(email, password);
+  const userId = await createUser({
+    email,
+    password,
+    firstName,
+    lastName,
+    phone,
+    primaryBand,
+    primaryInstrument,
+  });
+  const user = await getUserById(userId);
+  const registrationEmailSent = await sendRegistrationWelcomeEmail(user);
   const sessionId = await createSession(userId);
   response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(response.req)));
-  return sendJson(response, 201, { user: serializeUser(await getUserById(userId)) });
+  return sendJson(response, 201, {
+    user: serializeUser(user),
+    registrationEmailSent,
+  });
 }
 
 async function handleLogin(response, body) {
@@ -200,15 +267,21 @@ async function handleLogin(response, body) {
   return sendJson(response, 200, { user: serializeUser(user) });
 }
 
-async function createUser(email, password) {
+async function createUser(payload) {
   const id = crypto.randomUUID();
-  const { salt, hash } = hashPassword(password);
+  const { salt, hash } = hashPassword(payload.password);
   const createdAt = nowIso();
 
   await updateData((data) => {
     data.users.push({
       id,
-      email,
+      email: payload.email,
+      firstName: asString(payload.firstName),
+      lastName: asString(payload.lastName),
+      address: asString(payload.address),
+      phone: asString(payload.phone),
+      primaryBand: asString(payload.primaryBand),
+      primaryInstrument: asString(payload.primaryInstrument),
       passwordHash: hash,
       passwordSalt: salt,
       createdAt,
@@ -241,6 +314,146 @@ async function createSession(userId) {
   });
 
   return id;
+}
+
+async function sendRegistrationWelcomeEmail(user) {
+  if (!user?.email) {
+    return false;
+  }
+
+  const transporter = getMailTransporter();
+  if (!transporter) {
+    return false;
+  }
+
+  const firstName = user.firstName || "glazbeniku";
+  const loginUrl = `http://${HOST}:${PORT}`;
+
+  try {
+    await transporter.sendMail({
+      from: formatMailSender(),
+      to: user.email,
+      subject: "Dobrodosao u Gazza Manager",
+      text: [
+        `Bok ${firstName},`,
+        "",
+        "tvoj korisnicki racun je uspjesno kreiran.",
+        "Gazza Manager ti pomaze pratiti nastupe, financije i opremu na jednom mjestu.",
+        "",
+        `Prijava: ${loginUrl}`,
+        "",
+        "Ako nisi ti kreirao racun, ignoriraj ovu poruku.",
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1c2844;">
+          <h2 style="margin-bottom:12px;">Bok ${escapeHtml(firstName)},</h2>
+          <p>Tvoj korisnicki racun je uspjesno kreiran.</p>
+          <p>Gazza Manager ti pomaze pratiti nastupe, financije i opremu na jednom mjestu.</p>
+          <p>
+            <a href="${escapeAttribute(loginUrl)}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#4e84ff;color:#ffffff;text-decoration:none;font-weight:700;">
+              Otvori aplikaciju
+            </a>
+          </p>
+          <p style="color:#6f7b95;">Ako nisi ti kreirao racun, slobodno ignoriraj ovu poruku.</p>
+        </div>
+      `,
+    });
+
+    return true;
+  } catch (error) {
+    console.error("Slanje registracijskog emaila nije uspjelo:", error.message || error);
+    return false;
+  }
+}
+
+async function sendTestEmail(user) {
+  if (!user?.email) {
+    return false;
+  }
+
+  const transporter = getMailTransporter();
+  if (!transporter) {
+    return false;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: formatMailSender(),
+      to: user.email,
+      subject: "Gazza Manager SMTP test",
+      text: [
+        "Ovo je testni email iz Gazza Manager aplikacije.",
+        "",
+        "Ako si primio ovu poruku, SMTP je ispravno povezan.",
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1c2844;">
+          <h2>Gazza Manager SMTP test</h2>
+          <p>Ovo je testni email iz Gazza Manager aplikacije.</p>
+          <p>Ako si primio ovu poruku, SMTP je ispravno povezan.</p>
+        </div>
+      `,
+    });
+
+    return true;
+  } catch (error) {
+    console.error("Slanje testnog emaila nije uspjelo:", error.message || error);
+    return false;
+  }
+}
+
+function getMailTransporter() {
+  if (mailTransporter) {
+    return mailTransporter;
+  }
+
+  if (!nodemailer || !SMTP_HOST || !SMTP_PORT || !SMTP_FROM) {
+    return null;
+  }
+
+  const auth = SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined;
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    auth,
+  });
+
+  return mailTransporter;
+}
+
+function formatMailSender() {
+  return SMTP_FROM_NAME ? `"${SMTP_FROM_NAME}" <${SMTP_FROM}>` : SMTP_FROM;
+}
+
+async function getMailStatus() {
+  const transporter = getMailTransporter();
+  const status = {
+    nodemailerInstalled: Boolean(nodemailer),
+    transporterReady: Boolean(transporter),
+    smtpHost: SMTP_HOST || "",
+    smtpPort: SMTP_PORT || 0,
+    smtpSecure: SMTP_SECURE,
+    smtpUserConfigured: Boolean(SMTP_USER),
+    smtpPassConfigured: Boolean(SMTP_PASS),
+    smtpFrom: SMTP_FROM || "",
+    smtpFromName: SMTP_FROM_NAME || "",
+    smtpVerified: false,
+    smtpVerifyError: "",
+  };
+
+  if (!transporter) {
+    return status;
+  }
+
+  try {
+    await transporter.verify();
+    status.smtpVerified = true;
+  } catch (error) {
+    status.smtpVerifyError = error.message || String(error);
+  }
+
+  return status;
 }
 
 async function getSession(sessionId) {
@@ -277,9 +490,62 @@ async function buildBootstrapState(userId) {
     user: serializeUser(await getUserById(userId)),
     settings: await getSettings(userId),
     bands: await listBands(userId),
+    bandDirectory: await listBandDirectory(),
     gigs: await listGigs(userId),
     equipment: await listEquipment(userId),
   };
+}
+
+async function updateUserProfile(userId, payload) {
+  const firstName = asString(payload.firstName);
+  const lastName = asString(payload.lastName);
+  const address = asString(payload.address);
+  const phone = asString(payload.phone);
+  const primaryBand = asString(payload.primaryBand);
+  const primaryInstrument = asString(payload.primaryInstrument);
+
+  if (!firstName || !lastName || !phone) {
+    throw createHttpError(400, "Ime, prezime i broj mobitela su obavezni.");
+  }
+
+  await ensureBandExists(userId, primaryBand);
+
+  await updateData((data) => {
+    const user = data.users.find((item) => item.id === userId);
+    if (!user) {
+      throw createHttpError(404, "Korisnik nije pronaden.");
+    }
+
+    user.firstName = firstName;
+    user.lastName = lastName;
+    user.address = address;
+    user.phone = phone;
+    user.primaryBand = primaryBand;
+    user.primaryInstrument = primaryInstrument;
+  });
+
+  return serializeUser(await getUserById(userId));
+}
+
+async function deleteUserAccount(userId) {
+  await updateData((data) => {
+    data.users = data.users.filter((user) => user.id !== userId);
+    data.sessions = data.sessions.filter((session) => session.userId !== userId);
+
+    // Remove any per-user Google Calendar sync preferences and imported event copies.
+    data.settings = data.settings.filter((settings) => settings.userId !== userId);
+    data.bands = data.bands.filter((band) => band.userId !== userId);
+    data.gigs = data.gigs.filter((gig) => gig.userId !== userId);
+    data.equipment = data.equipment.filter((item) => item.userId !== userId);
+
+    // Future-proof cleanup in case separate Google sync stores are introduced later.
+    if (Array.isArray(data.googleCalendarTokens)) {
+      data.googleCalendarTokens = data.googleCalendarTokens.filter((token) => token.userId !== userId);
+    }
+    if (Array.isArray(data.googleCalendarConnections)) {
+      data.googleCalendarConnections = data.googleCalendarConnections.filter((connection) => connection.userId !== userId);
+    }
+  });
 }
 
 async function listBands(userId) {
@@ -290,6 +556,20 @@ async function listBands(userId) {
     .map(({ userId: _userId, ...band }) => band);
 }
 
+async function listBandDirectory() {
+  const data = await readData();
+  const names = new Set();
+
+  data.bands.forEach((band) => {
+    const name = asString(band.name);
+    if (name) {
+      names.add(name);
+    }
+  });
+
+  return [...names].sort((a, b) => a.localeCompare(b, "hr")).map((name) => ({ name }));
+}
+
 async function createBand(userId, payload) {
   const name = asString(payload.name);
   if (!name) {
@@ -297,7 +577,8 @@ async function createBand(userId, payload) {
   }
 
   const data = await readData();
-  const existing = data.bands.find((band) => band.userId === userId && band.name.toLowerCase() === name.toLowerCase());
+  const normalizedName = name.toLocaleLowerCase("hr");
+  const existing = data.bands.find((band) => asString(band.name).toLocaleLowerCase("hr") === normalizedName);
   if (existing) {
     const { userId: _userId, ...band } = existing;
     return band;
@@ -324,11 +605,18 @@ async function updateBand(userId, bandId, payload) {
     throw createHttpError(400, "Naziv benda je obavezan.");
   }
 
+  const normalizedName = name.toLocaleLowerCase("hr");
+
   let updatedBand = null;
   await updateData((data) => {
     const band = data.bands.find((item) => item.id === bandId && item.userId === userId);
     if (!band) {
       throw createHttpError(404, "Bend nije pronaden.");
+    }
+
+    const duplicate = data.bands.find((item) => item.id !== bandId && asString(item.name).toLocaleLowerCase("hr") === normalizedName);
+    if (duplicate) {
+      throw createHttpError(409, "Bend s tim nazivom vec postoji.");
     }
 
     const oldName = band.name;
@@ -386,13 +674,29 @@ async function createGig(userId, payload, forcedId = null) {
 
 async function updateGig(userId, gigId, payload) {
   const gig = normalizeGigPayload(payload);
-  await ensureBandExists(userId, gig.bandName);
 
   let updatedGig = null;
   await updateData((data) => {
     const existing = data.gigs.find((item) => item.id === gigId && item.userId === userId);
     if (!existing) {
       throw createHttpError(404, "Nastup nije pronaden.");
+    }
+
+    // Google Calendar imports must never populate the saved band directory.
+    if (existing.source !== "google-import" && gig.bandName) {
+      const alreadySaved = data.bands.some((band) => (
+        band.userId === userId
+        && asString(band.name).toLocaleLowerCase("hr") === gig.bandName.toLocaleLowerCase("hr")
+      ));
+
+      if (!alreadySaved) {
+        data.bands.push({
+          id: crypto.randomUUID(),
+          userId,
+          name: gig.bandName,
+          createdAt: nowIso(),
+        });
+      }
     }
 
     Object.assign(existing, gig, { updatedAt: nowIso() });
@@ -694,8 +998,18 @@ function serializeUser(user) {
   return user ? {
     id: user.id,
     email: user.email,
+    firstName: user.firstName || "",
+    lastName: user.lastName || "",
+    address: user.address || "",
+    phone: user.phone || "",
+    primaryBand: user.primaryBand || "",
+    primaryInstrument: user.primaryInstrument || "",
     createdAt: user.createdAt,
   } : null;
+}
+
+function isPasswordStrongEnough(password) {
+  return typeof password === "string" && password.length >= 8 && /\d/.test(password);
 }
 
 function parseCookies(rawCookie) {
@@ -921,16 +1235,6 @@ function updateData(mutator) {
   });
 
   return writeQueue;
-}
-
-async function ensureDefaultUsers() {
-  const data = await readData();
-  const existing = data.users.find((user) => user.email === "dario.doko@gmail.com");
-  if (existing) {
-    return;
-  }
-
-  await createUser("dario.doko@gmail.com", "12345678");
 }
 
 function isSecureRequest(request) {

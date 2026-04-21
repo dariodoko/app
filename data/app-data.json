@@ -1,7 +1,44 @@
 {
-  "users": [],
+  "users": [
+    {
+      "id": "1c2d4585-710d-494b-b6b3-bcbd962897e3",
+      "email": "dario.doko@gmail.com",
+      "firstName": "Dario",
+      "lastName": "Doko",
+      "address": "",
+      "phone": "000000000",
+      "primaryBand": "",
+      "primaryInstrument": "",
+      "passwordHash": "8de723394f060482d9506233fb5658fd405d19d373d14874a979fadd57e28b90188bcdc84c7e2b26e72b5af893e07cd972bd2d16608bb77c40eb65dab2cdd957",
+      "passwordSalt": "45e13bf2cf25cd0fe742a5279aca5bb3",
+      "createdAt": "2026-04-21T19:40:53.267Z"
+    }
+  ],
   "sessions": [],
-  "settings": [],
+  "settings": [
+    {
+      "userId": "1c2d4585-710d-494b-b6b3-bcbd962897e3",
+      "googleCalendarId": "primary"
+    }
+  ],
+  "bandDirectory": [
+    { "name": "BEHAR" },
+    { "name": "BONUS BAND OSIJEK" },
+    { "name": "BOSUTSKI BEĆARI" },
+    { "name": "DYACO" },
+    { "name": "GRUPA DELTA PLOČE" },
+    { "name": "INSTAGRAM" },
+    { "name": "JAKOV JOZINOVIĆ BEND" },
+    { "name": "JELENA ROZGA BEND" },
+    { "name": "MATE BULIĆ BEND" },
+    { "name": "NIGHT EXPRESS" },
+    { "name": "SINNERS" },
+    { "name": "SINOVI RAVNICE" },
+    { "name": "SLAVONSKI SAN" },
+    { "name": "SLAVONSKI VEZ" },
+    { "name": "SOUND" },
+    { "name": "ZLATNE STRUNE" }
+  ],
   "bands": [],
   "gigs": [],
   "equipment": [],

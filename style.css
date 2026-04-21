@@ -360,6 +360,17 @@ textarea {
   font-size: 0.86rem;
 }
 
+.sidebar-logo {
+  width: 108px;
+  max-width: 100%;
+  margin-top: 16px;
+  opacity: 0.72;
+  filter: grayscale(0.08) brightness(1.06);
+  border-radius: 12px;
+  pointer-events: none;
+  align-self: center;
+}
+
 .hidden {
   display: none;
 }
@@ -950,6 +961,14 @@ main {
 .saved-band-item strong {
   display: block;
   letter-spacing: -0.01em;
+}
+
+.saved-band-meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .small-button {

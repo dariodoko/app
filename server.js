@@ -26,7 +26,7 @@ const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || "Gazza Manager";
 const SESSION_COOKIE = "glazbeni_dnevnik_session";
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "app-data.json");
-const PUBLIC_FILES = new Set(["/index.html", "/style.css", "/app.js"]);
+const PUBLIC_FILES = new Set(["/index.html", "/style.css", "/app.js", "/logo.jpg"]);
 let mailTransporter = null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -559,6 +559,13 @@ async function listBands(userId) {
 async function listBandDirectory() {
   const data = await readData();
   const names = new Set();
+
+  data.bandDirectory.forEach((entry) => {
+    const name = asString(entry?.name ?? entry);
+    if (name) {
+      names.add(name);
+    }
+  });
 
   data.bands.forEach((band) => {
     const name = asString(band.name);
@@ -1206,6 +1213,7 @@ function createEmptyData() {
     users: [],
     sessions: [],
     settings: [],
+    bandDirectory: [],
     bands: [],
     gigs: [],
     equipment: [],
@@ -1219,6 +1227,7 @@ async function readData() {
     users: Array.isArray(data.users) ? data.users : [],
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
     settings: Array.isArray(data.settings) ? data.settings : [],
+    bandDirectory: Array.isArray(data.bandDirectory) ? data.bandDirectory : [],
     bands: Array.isArray(data.bands) ? data.bands : [],
     gigs: Array.isArray(data.gigs) ? data.gigs : [],
     equipment: Array.isArray(data.equipment) ? data.equipment : [],

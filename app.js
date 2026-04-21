@@ -10,6 +10,25 @@ const initialState = {
   equipment: [],
 };
 
+const DEFAULT_BAND_DIRECTORY = [
+  "BEHAR",
+  "BONUS BAND OSIJEK",
+  "BOSUTSKI BEĆARI",
+  "DYACO",
+  "GRUPA DELTA PLOČE",
+  "INSTAGRAM",
+  "JAKOV JOZINOVIĆ BEND",
+  "JELENA ROZGA BEND",
+  "MATE BULIĆ BEND",
+  "NIGHT EXPRESS",
+  "SINNERS",
+  "SINOVI RAVNICE",
+  "SLAVONSKI SAN",
+  "SLAVONSKI VEZ",
+  "SOUND",
+  "ZLATNE STRUNE",
+];
+
 let state = structuredClone(initialState);
 let authMode = "login";
 let activeGigDiaryId = null;
@@ -48,6 +67,7 @@ const elements = {
   profileAddressInput: document.getElementById("profileAddressInput"),
   profilePhoneInput: document.getElementById("profilePhoneInput"),
   profilePrimaryBandInput: document.getElementById("profilePrimaryBandInput"),
+  profileBandDropdown: document.getElementById("profileBandDropdown"),
   profilePrimaryInstrumentInput: document.getElementById("profilePrimaryInstrumentInput"),
   hero: document.querySelector(".hero"),
   quickMenuToggle: document.getElementById("quickMenuToggle"),
@@ -129,6 +149,9 @@ function bindEvents() {
   elements.bandName.addEventListener("focus", () => renderBandDropdown(elements.bandName.value));
   elements.bandName.addEventListener("click", () => renderBandDropdown(elements.bandName.value));
   elements.bandName.addEventListener("input", () => renderBandDropdown(elements.bandName.value));
+  elements.profilePrimaryBandInput?.addEventListener("focus", () => renderBandDropdown(elements.profilePrimaryBandInput.value, "profile"));
+  elements.profilePrimaryBandInput?.addEventListener("click", () => renderBandDropdown(elements.profilePrimaryBandInput.value, "profile"));
+  elements.profilePrimaryBandInput?.addEventListener("input", () => renderBandDropdown(elements.profilePrimaryBandInput.value, "profile"));
   elements.gigDate.addEventListener("input", syncGigNetEarningAvailability);
 
   elements.gigForm.addEventListener("submit", handleGigSubmit);
@@ -362,9 +385,10 @@ function handleDocumentClick(event) {
   }
 
   if (bandOption) {
-    elements.bandName.value = bandOption.dataset.bandOption;
+    const target = bandOption.dataset.bandTarget === "profile" ? elements.profilePrimaryBandInput : elements.bandName;
+    target.value = bandOption.dataset.bandOption;
     hideBandDropdown();
-    elements.bandName.blur();
+    target.blur();
     return;
   }
 
@@ -564,60 +588,106 @@ function renderHeroStats() {
   document.getElementById("heroEquipment").textContent = formatCurrency(equipmentNet);
 }
 
+function getCombinedBandDirectory() {
+  const names = new Map();
+
+  DEFAULT_BAND_DIRECTORY.forEach((name) => {
+    if (name) {
+      names.set(name.trim().toLocaleLowerCase("hr"), name.trim());
+    }
+  });
+
+  state.bandDirectory.forEach((band) => {
+    const name = typeof band === "string" ? band.trim() : band?.name?.trim();
+    if (name) {
+      names.set(name.toLocaleLowerCase("hr"), name);
+    }
+  });
+
+  state.bands.forEach((band) => {
+    const name = band?.name?.trim();
+    if (name) {
+      names.set(name.toLocaleLowerCase("hr"), name);
+    }
+  });
+
+  return [...names.values()].sort(localeSort);
+}
+
 function renderSuggestions() {
-  const bandNames = state.bandDirectory.map((band) => band.name);
+  const bandNames = getCombinedBandDirectory();
   const contractors = [...new Set(state.gigs.map((gig) => gig.contractor).filter(Boolean))].sort(localeSort);
 
   elements.bandSuggestions.innerHTML = bandNames.map((band) => `<option value="${escapeHtml(band)}"></option>`).join("");
   elements.contractorSuggestions.innerHTML = contractors.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
 }
 
-function renderBandDropdown(query = "") {
+function renderBandDropdown(query = "", target = "gig") {
   const normalizedQuery = query.trim().toLocaleLowerCase("hr");
-  const matches = state.bandDirectory
-    .map((band) => band.name)
+  const matches = getCombinedBandDirectory()
     .filter((band) => !normalizedQuery || band.toLocaleLowerCase("hr").includes(normalizedQuery));
 
   if (!matches.length) {
-    hideBandDropdown();
+    hideBandDropdown(target);
     return;
   }
 
-  elements.bandDropdown.innerHTML = matches
-    .map((band) => `<button type="button" class="autocomplete-option" data-band-option="${escapeHtml(band)}">${escapeHtml(band)}</button>`)
+  const dropdown = target === "profile" ? elements.profileBandDropdown : elements.bandDropdown;
+  dropdown.innerHTML = matches
+    .map((band) => `<button type="button" class="autocomplete-option" data-band-option="${escapeHtml(band)}" data-band-target="${target}">${escapeHtml(band)}</button>`)
     .join("");
-  elements.bandDropdown.classList.remove("hidden");
+  dropdown.classList.remove("hidden");
 }
 
-function hideBandDropdown() {
-  elements.bandDropdown.classList.add("hidden");
-  elements.bandDropdown.innerHTML = "";
+function hideBandDropdown(target = null) {
+  const dropdowns = target === "profile"
+    ? [elements.profileBandDropdown]
+    : target === "gig"
+      ? [elements.bandDropdown]
+      : [elements.bandDropdown, elements.profileBandDropdown];
+
+  dropdowns.filter(Boolean).forEach((dropdown) => {
+    dropdown.classList.add("hidden");
+    dropdown.innerHTML = "";
+  });
 }
 
 function isSavedBandName(name) {
   const normalized = name.trim().toLocaleLowerCase("hr");
-  return Boolean(normalized) && state.bandDirectory.some((band) => band.name.trim().toLocaleLowerCase("hr") === normalized);
+  return Boolean(normalized) && getCombinedBandDirectory().some((band) => band.trim().toLocaleLowerCase("hr") === normalized);
 }
 
 function renderSavedBands() {
-  if (!state.bands.length) {
+  const personalBandsByName = new Map(
+    state.bands.map((band) => [band.name.trim().toLocaleLowerCase("hr"), band]),
+  );
+  const visibleBands = getCombinedBandDirectory()
+    .map((name) => ({
+      name,
+      personal: personalBandsByName.get(name.trim().toLocaleLowerCase("hr")) || null,
+    }));
+
+  if (!visibleBands.length) {
     elements.savedBandsList.className = "saved-bands-list empty-state";
     elements.savedBandsList.textContent = "Jos nema spremljenih bendova.";
     return;
   }
 
-  elements.savedBandsList.className = "saved-bands-list";
-  elements.savedBandsList.innerHTML = state.bands.map((band) => `
+  const markup = visibleBands.map((band) => `
     <article class="saved-band-item">
       <div>
         <strong>${escapeHtml(band.name)}</strong>
+        <span class="saved-band-meta">${band.personal ? "U tvom profilu" : "Dostupno u prijedlozima"}</span>
       </div>
       <div class="saved-band-actions">
-        <button type="button" class="ghost-button small-button" data-edit-band="${band.id}">Uredi</button>
-        <button type="button" class="danger-button small-button" data-delete-band="${band.id}">Obrisi</button>
+        ${band.personal ? `<button type="button" class="ghost-button small-button" data-edit-band="${band.personal.id}">Uredi</button>
+        <button type="button" class="danger-button small-button" data-delete-band="${band.personal.id}">Obrisi</button>` : ""}
       </div>
     </article>
   `).join("");
+
+  elements.savedBandsList.className = "saved-bands-list";
+  elements.savedBandsList.innerHTML = markup;
 }
 
 async function handleBandRename(bandId) {

@@ -65,4 +65,10 @@ GOOGLE_CLIENT_ID=vas_google_oauth_client_id
 
 Ili napravi lokalnu `.env` datoteku po uzoru na `.env.example`.
 
+Za ispravan link u emailovima na produkciji postavi i:
+
+```bash
+APP_URL=https://vasa-domena.hr
+```
+
 Svaki korisnik nakon prijave u svoj Google racun vidi samo svoje Google kalendare i bira svoj kalendar za sinkronizaciju.

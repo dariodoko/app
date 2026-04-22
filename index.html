@@ -24,33 +24,37 @@
         </p>
       </div>
       <form id="authForm" class="form-grid">
-        <label class="auth-label full-width">
+        <label id="authEmailField" class="auth-label full-width">
           <span class="auth-label-text">Email</span>
           <input type="email" id="authEmail" placeholder="Unesite email adresu" required>
         </label>
-        <label class="auth-label full-width auth-register-field hidden">
+        <label id="authFirstNameField" class="auth-label full-width auth-register-field hidden">
           <span class="auth-label-text">Ime</span>
           <input type="text" id="authFirstName" placeholder="Unesite ime">
         </label>
-        <label class="auth-label full-width auth-register-field hidden">
+        <label id="authLastNameField" class="auth-label full-width auth-register-field hidden">
           <span class="auth-label-text">Prezime</span>
           <input type="text" id="authLastName" placeholder="Unesite prezime">
         </label>
-        <label class="auth-label full-width auth-register-field hidden">
+        <label id="authPhoneField" class="auth-label full-width auth-register-field hidden">
           <span class="auth-label-text">Broj mobitela</span>
           <input type="text" id="authPhone" placeholder="Unesite broj mobitela">
         </label>
-        <label class="auth-label full-width">
+        <label id="authPasswordField" class="auth-label full-width">
           <span class="auth-label-text">Lozinka</span>
           <input type="password" id="authPassword" placeholder="Unesite lozinku" required>
         </label>
-        <label class="auth-label full-width auth-register-field hidden">
+        <label id="authPasswordConfirmField" class="auth-label full-width auth-register-field hidden">
           <span class="auth-label-text">Ponovi lozinku</span>
           <input type="password" id="authPasswordConfirm" placeholder="Ponovite lozinku">
         </label>
         <div class="full-width auth-actions">
           <button type="submit" id="authSubmitButton" class="primary-button">Prijava</button>
           <button type="button" id="authToggleMode" class="ghost-button">Nemam racun</button>
+        </div>
+        <div class="full-width auth-secondary-actions">
+          <button type="button" id="forgotPasswordButton" class="text-button">Zaboravljena lozinka?</button>
+          <button type="button" id="authBackToLoginButton" class="text-button hidden">Natrag na prijavu</button>
         </div>
       </form>
       <p id="authStatus" class="google-calendar-status">Prijavi se za nastavak.</p>
@@ -120,14 +124,14 @@
           <p class="hero-copy">Prati nastupe, zaradu i opremu iz jednog preglednog dashboarda.</p>
         </div>
         <div class="user-bar-actions">
-          <div class="account-chip">
+          <button type="button" class="account-chip account-chip-link" data-tab-target="profil" aria-label="Otvori korisnicki profil">
             <span class="account-avatar" id="currentUserInitial">G</span>
             <div class="account-copy">
               <p class="eyebrow">Korisnički racun</p>
               <strong id="currentUserName">-</strong>
               <span id="currentUserBand" class="account-subtitle">-</span>
             </div>
-          </div>
+          </button>
           <button type="button" id="logoutButton" class="danger-button small-button">Odjava</button>
         </div>
       </section>
@@ -545,9 +549,28 @@
               </label>
                 <div class="full-width form-actions">
                   <button type="submit" class="primary-button">Spremi podatke</button>
+                  <button type="button" id="changePasswordToggleButton" class="ghost-button">Izmijeni lozinku</button>
                   <button type="button" id="deleteAccountButton" class="danger-button">Obrisi racun</button>
                 </div>
               </form>
+            <form id="profilePasswordForm" class="form-grid profile-password-form hidden">
+              <label>
+                Trenutna lozinka
+                <input type="password" id="currentPasswordInput" placeholder="Unesite trenutnu lozinku">
+              </label>
+              <label>
+                Nova lozinka
+                <input type="password" id="newPasswordInput" placeholder="Unesite novu lozinku">
+              </label>
+              <label class="full-width">
+                Ponovi novu lozinku
+                <input type="password" id="confirmNewPasswordInput" placeholder="Ponovite novu lozinku">
+              </label>
+              <div class="full-width form-actions">
+                <button type="submit" class="primary-button">Spremi novu lozinku</button>
+                <button type="button" id="cancelPasswordChangeButton" class="ghost-button">Odustani</button>
+              </div>
+            </form>
             <p id="profileStatus" class="google-calendar-status hidden"></p>
             <div class="detail-grid profile-detail-grid">
               <article class="detail-item">
@@ -563,8 +586,8 @@
                 <strong>Osobni workspace</strong>
               </article>
               <article class="detail-item">
-                <span>Sigurnost</span>
-                <strong>Zasticena prijava</strong>
+                <span>Sigurnost profila</span>
+                <strong>Sigurna prijava</strong>
               </article>
             </div>
             <div class="detail-grid profile-detail-grid profile-info-grid">
@@ -598,8 +621,8 @@
           <section class="panel">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Brzi pregled</p>
-                <h2>Sto je trenutno najvaznije</h2>
+                <p class="eyebrow">Brzi pregled nastupa</p>
+                <h2>Što je trenutno najvaznije</h2>
               </div>
             </div>
             <div class="metric-grid">
@@ -609,11 +632,11 @@
               </article>
               <article class="metric-card">
                 <span>Zarada</span>
-                <strong id="profileRevenueInfo">Financije u jednom tabu</strong>
+                <strong id="profileRevenueInfo">Financije i zarada od gaža na jednom mjestu</strong>
               </article>
               <article class="metric-card">
                 <span>Oprema</span>
-                <strong id="profileEquipmentInfo">Praćenje kupnje i prodaje</strong>
+                <strong id="profileEquipmentInfo">Praćenje kupnje i prodaje opreme</strong>
               </article>
               <article class="metric-card highlight">
                 <span>Workspace</span>

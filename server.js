@@ -15,6 +15,7 @@ loadEnvFile();
 
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
+const APP_URL = (process.env.APP_URL || "").trim().replace(/\/+$/, "");
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const SMTP_HOST = process.env.SMTP_HOST || "";
 const SMTP_PORT = Number.parseInt(process.env.SMTP_PORT || "587", 10);
@@ -59,6 +60,16 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
       const body = await readJsonBody(request);
       return handleLogin(response, body);
+    }
+
+    if (url.pathname === "/api/auth/forgot-password" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return handleForgotPassword(response, body);
+    }
+
+    if (url.pathname === "/api/auth/reset-password" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return handleResetPassword(response, body);
     }
 
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
@@ -120,6 +131,11 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === "/api/profile" && (request.method === "PUT" || request.method === "POST")) {
       const body = await readJsonBody(request);
       return sendJson(response, 200, { user: await updateUserProfile(session.userId, body) });
+    }
+
+    if (url.pathname === "/api/profile/password" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return handleProfilePasswordChange(response, session.userId, body);
     }
 
     if (url.pathname === "/api/profile" && request.method === "DELETE") {
@@ -252,12 +268,13 @@ async function handleRegister(response, body) {
     primaryInstrument,
   });
   const user = await getUserById(userId);
-  const registrationEmailSent = await sendRegistrationWelcomeEmail(user);
+  const registrationEmailResult = await sendRegistrationWelcomeEmail(user);
   const sessionId = await createSession(userId);
   response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(response.req)));
   return sendJson(response, 201, {
     user: serializeUser(user),
-    registrationEmailSent,
+    registrationEmailSent: registrationEmailResult.sent,
+    registrationEmailError: registrationEmailResult.error,
   });
 }
 
@@ -274,6 +291,101 @@ async function handleLogin(response, body) {
   const sessionId = await createSession(user.id);
   response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(response.req)));
   return sendJson(response, 200, { user: serializeUser(user) });
+}
+
+async function handleForgotPassword(response, body) {
+  const email = normalizeEmail(body.email);
+  if (!email) {
+    throw createHttpError(400, "Unesite email adresu.");
+  }
+
+  const data = await readData();
+  const user = data.users.find((item) => item.email === email);
+
+  if (user) {
+    const resetToken = await createPasswordResetToken(user.id);
+    await sendPasswordResetEmail(user, resetToken);
+  }
+
+  return sendJson(response, 200, {
+    ok: true,
+    message: "Ako racun postoji, poslali smo link za postavljanje nove lozinke.",
+  });
+}
+
+async function handleResetPassword(response, body) {
+  const token = asString(body.token);
+  const password = typeof body.password === "string" ? body.password : "";
+
+  if (!token) {
+    throw createHttpError(400, "Link za reset lozinke nije valjan.");
+  }
+
+  if (!isPasswordStrongEnough(password)) {
+    throw createHttpError(400, "Lozinka mora imati najmanje 8 znakova i barem jedan broj.");
+  }
+
+  const reset = await consumePasswordResetToken(token);
+  if (!reset) {
+    throw createHttpError(400, "Link za reset lozinke je istekao ili nije valjan.");
+  }
+
+  const { salt, hash } = hashPassword(password);
+
+  await updateData((data) => {
+    const user = data.users.find((item) => item.id === reset.userId);
+    if (!user) {
+      throw createHttpError(404, "Korisnik nije pronaden.");
+    }
+
+    user.passwordSalt = salt;
+    user.passwordHash = hash;
+    data.sessions = data.sessions.filter((session) => session.userId !== reset.userId);
+    data.passwordResets = (data.passwordResets || []).filter((item) => item.userId !== reset.userId);
+  });
+
+  return sendJson(response, 200, {
+    ok: true,
+    message: "Nova lozinka je spremljena. Sad se mozes prijaviti.",
+  });
+}
+
+async function handleProfilePasswordChange(response, userId, body) {
+  const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+  const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+
+  if (!currentPassword || !newPassword) {
+    throw createHttpError(400, "Trenutna i nova lozinka su obavezne.");
+  }
+
+  if (!isPasswordStrongEnough(newPassword)) {
+    throw createHttpError(400, "Nova lozinka mora imati najmanje 8 znakova i barem jedan broj.");
+  }
+
+  const data = await readData();
+  const user = data.users.find((item) => item.id === userId);
+
+  if (!user || !verifyPassword(currentPassword, user.passwordSalt, user.passwordHash)) {
+    throw createHttpError(401, "Trenutna lozinka nije ispravna.");
+  }
+
+  const { salt, hash } = hashPassword(newPassword);
+
+  await updateData((next) => {
+    const nextUser = next.users.find((item) => item.id === userId);
+    if (!nextUser) {
+      throw createHttpError(404, "Korisnik nije pronaden.");
+    }
+
+    nextUser.passwordSalt = salt;
+    nextUser.passwordHash = hash;
+    next.passwordResets = (next.passwordResets || []).filter((item) => item.userId !== userId);
+  });
+
+  return sendJson(response, 200, {
+    ok: true,
+    message: "Lozinka je uspjesno promijenjena.",
+  });
 }
 
 async function createUser(payload) {
@@ -327,19 +439,19 @@ async function createSession(userId) {
 
 async function sendRegistrationWelcomeEmail(user) {
   if (!user?.email) {
-    return false;
+    return { sent: false, error: "Email korisnika nije dostupan." };
   }
 
   const transporter = getMailTransporter();
   if (!transporter) {
-    return false;
+    return { sent: false, error: "SMTP transporter nije spreman." };
   }
 
   const firstName = user.firstName || "glazbeniku";
-  const loginUrl = `http://${HOST}:${PORT}`;
+  const loginUrl = getAppUrl();
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: formatMailSender(),
       to: user.email,
       subject: "Dobrodosao u Gazza Manager",
@@ -368,10 +480,62 @@ async function sendRegistrationWelcomeEmail(user) {
       `,
     });
 
-    return true;
+    logMailDeliveryResult("Registracijski email", user.email, info);
+
+    return { sent: true, error: "" };
   } catch (error) {
-    console.error("Slanje registracijskog emaila nije uspjelo:", error.message || error);
-    return false;
+    logMailDeliveryError("Slanje registracijskog emaila nije uspjelo", user.email, error);
+    return { sent: false, error: formatMailError(error) };
+  }
+}
+
+async function sendPasswordResetEmail(user, token) {
+  if (!user?.email) {
+    return { sent: false, error: "Email korisnika nije dostupan." };
+  }
+
+  const transporter = getMailTransporter();
+  if (!transporter) {
+    return { sent: false, error: "SMTP transporter nije spreman." };
+  }
+
+  const firstName = user.firstName || "glazbeniku";
+  const resetUrl = `${getAppUrl()}/?resetToken=${encodeURIComponent(token)}`;
+
+  try {
+    const info = await transporter.sendMail({
+      from: formatMailSender(),
+      to: user.email,
+      subject: "Postavi novu lozinku za Gazza Manager",
+      text: [
+        `Bok ${firstName},`,
+        "",
+        "zaprimili smo zahtjev za postavljanje nove lozinke.",
+        `Klikni na link za nastavak: ${resetUrl}`,
+        "",
+        "Link vrijedi 60 minuta.",
+        "Ako nisi ti zatrazio promjenu lozinke, ignoriraj ovu poruku.",
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1c2844;">
+          <h2 style="margin-bottom:12px;">Bok ${escapeHtml(firstName)},</h2>
+          <p>Zaprimili smo zahtjev za postavljanje nove lozinke.</p>
+          <p>
+            <a href="${escapeAttribute(resetUrl)}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#4e84ff;color:#ffffff;text-decoration:none;font-weight:700;">
+              Postavi novu lozinku
+            </a>
+          </p>
+          <p>Link vrijedi 60 minuta.</p>
+          <p style="color:#6f7b95;">Ako nisi ti zatrazio promjenu lozinke, ignoriraj ovu poruku.</p>
+        </div>
+      `,
+    });
+
+    logMailDeliveryResult("Reset lozinke", user.email, info);
+    return { sent: true, error: "" };
+  } catch (error) {
+    logMailDeliveryError("Slanje emaila za reset lozinke nije uspjelo", user.email, error);
+    return { sent: false, error: formatMailError(error) };
   }
 }
 
@@ -386,7 +550,7 @@ async function sendTestEmail(user) {
   }
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: formatMailSender(),
       to: user.email,
       subject: "Gazza Manager SMTP test",
@@ -404,9 +568,11 @@ async function sendTestEmail(user) {
       `,
     });
 
+    logMailDeliveryResult("Testni email", user.email, info);
+
     return true;
   } catch (error) {
-    console.error("Slanje testnog emaila nije uspjelo:", error.message || error);
+    logMailDeliveryError("Slanje testnog emaila nije uspjelo", user.email, error);
     return false;
   }
 }
@@ -433,6 +599,60 @@ function getMailTransporter() {
 
 function formatMailSender() {
   return SMTP_FROM_NAME ? `"${SMTP_FROM_NAME}" <${SMTP_FROM}>` : SMTP_FROM;
+}
+
+function getAppUrl() {
+  if (APP_URL) {
+    return APP_URL;
+  }
+
+  return `http://${HOST}:${PORT}`;
+}
+
+function logMailDeliveryResult(label, recipient, info) {
+  console.log(`${label} prihvacen za ${recipient}.`, {
+    messageId: info?.messageId || "",
+    accepted: Array.isArray(info?.accepted) ? info.accepted : [],
+    rejected: Array.isArray(info?.rejected) ? info.rejected : [],
+    response: info?.response || "",
+  });
+}
+
+function logMailDeliveryError(label, recipient, error) {
+  console.error(`${label} za ${recipient}:`, {
+    message: error?.message || String(error),
+    code: error?.code || "",
+    command: error?.command || "",
+    response: error?.response || "",
+    responseCode: error?.responseCode || "",
+  });
+}
+
+function formatMailError(error) {
+  if (!error) {
+    return "Nepoznata SMTP greska.";
+  }
+
+  const parts = [
+    error.response,
+    error.message,
+    error.code,
+  ].filter(Boolean);
+
+  return parts.length ? parts.join(" | ") : "Nepoznata SMTP greska.";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value);
 }
 
 async function getMailStatus() {
@@ -492,6 +712,50 @@ async function clearSession(sessionId) {
   await updateData((data) => {
     data.sessions = data.sessions.filter((item) => item.id !== sessionId);
   });
+}
+
+async function createPasswordResetToken(userId) {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashResetToken(rawToken);
+
+  await updateData((data) => {
+    data.passwordResets = (data.passwordResets || []).filter((item) => {
+      return item.userId !== userId && new Date(item.expiresAt).getTime() > Date.now();
+    });
+
+    data.passwordResets.push({
+      id: crypto.randomUUID(),
+      userId,
+      tokenHash,
+      expiresAt: addMinutes(60),
+      createdAt: nowIso(),
+    });
+  });
+
+  return rawToken;
+}
+
+async function consumePasswordResetToken(token) {
+  const tokenHash = hashResetToken(token);
+  const data = await readData();
+  const reset = (data.passwordResets || []).find((item) => item.tokenHash === tokenHash);
+
+  if (!reset) {
+    return null;
+  }
+
+  if (new Date(reset.expiresAt).getTime() < Date.now()) {
+    await updateData((next) => {
+      next.passwordResets = (next.passwordResets || []).filter((item) => item.tokenHash !== tokenHash);
+    });
+    return null;
+  }
+
+  await updateData((next) => {
+    next.passwordResets = (next.passwordResets || []).filter((item) => item.tokenHash !== tokenHash);
+  });
+
+  return reset;
 }
 
 async function buildBootstrapState(userId) {
@@ -1047,6 +1311,10 @@ function buildExpiredSessionCookie(secure = false) {
   return `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
+function hashResetToken(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
@@ -1089,6 +1357,12 @@ function nowIso() {
 function addDays(days) {
   const date = new Date();
   date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+function addMinutes(minutes) {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() + minutes);
   return date.toISOString();
 }
 
@@ -1223,6 +1497,7 @@ function createEmptyData() {
   return {
     users: [],
     sessions: [],
+    passwordResets: [],
     settings: [],
     bandDirectory: [],
     bands: [],
@@ -1237,6 +1512,7 @@ async function readData() {
   return {
     users: Array.isArray(data.users) ? data.users : [],
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
+    passwordResets: Array.isArray(data.passwordResets) ? data.passwordResets : [],
     settings: Array.isArray(data.settings) ? data.settings : [],
     bandDirectory: Array.isArray(data.bandDirectory) ? data.bandDirectory : [],
     bands: Array.isArray(data.bands) ? data.bands : [],

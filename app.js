@@ -31,6 +31,7 @@ const DEFAULT_BAND_DIRECTORY = [
 
 let state = structuredClone(initialState);
 let authMode = "login";
+let authResetToken = "";
 let activeGigDiaryId = null;
 let gigSearchQuery = "";
 const GOOGLE_OAUTH_STORAGE_KEY = "glazbeni_dnevnik_google_oauth";
@@ -48,14 +49,25 @@ const elements = {
   authPasswordConfirm: document.getElementById("authPasswordConfirm"),
   authSubmitButton: document.getElementById("authSubmitButton"),
   authToggleMode: document.getElementById("authToggleMode"),
+  authEmailField: document.getElementById("authEmailField"),
+  authFirstNameField: document.getElementById("authFirstNameField"),
+  authLastNameField: document.getElementById("authLastNameField"),
+  authPhoneField: document.getElementById("authPhoneField"),
+  authPasswordField: document.getElementById("authPasswordField"),
+  authPasswordConfirmField: document.getElementById("authPasswordConfirmField"),
   authStatus: document.getElementById("authStatus"),
   authRegisterFields: [...document.querySelectorAll(".auth-register-field")],
+  forgotPasswordButton: document.getElementById("forgotPasswordButton"),
+  authBackToLoginButton: document.getElementById("authBackToLoginButton"),
   currentUserName: document.getElementById("currentUserName"),
   currentUserBand: document.getElementById("currentUserBand"),
   currentUserInitial: document.getElementById("currentUserInitial"),
   profileUserEmail: document.getElementById("profileUserEmail"),
   profileForm: document.getElementById("profileForm"),
   profileStatus: document.getElementById("profileStatus"),
+  profilePasswordForm: document.getElementById("profilePasswordForm"),
+  changePasswordToggleButton: document.getElementById("changePasswordToggleButton"),
+  cancelPasswordChangeButton: document.getElementById("cancelPasswordChangeButton"),
   deleteAccountButton: document.getElementById("deleteAccountButton"),
   profileFirstName: document.getElementById("profileFirstName"),
   profileLastName: document.getElementById("profileLastName"),
@@ -70,6 +82,9 @@ const elements = {
   profilePrimaryBandInput: document.getElementById("profilePrimaryBandInput"),
   profileBandDropdown: document.getElementById("profileBandDropdown"),
   profilePrimaryInstrumentInput: document.getElementById("profilePrimaryInstrumentInput"),
+  currentPasswordInput: document.getElementById("currentPasswordInput"),
+  newPasswordInput: document.getElementById("newPasswordInput"),
+  confirmNewPasswordInput: document.getElementById("confirmNewPasswordInput"),
   hero: document.querySelector(".hero"),
   quickMenuToggle: document.getElementById("quickMenuToggle"),
   quickMenuPanel: document.getElementById("quickMenuPanel"),
@@ -131,6 +146,7 @@ async function boot() {
   setDefaultDates();
   syncGigNetEarningAvailability();
   syncAdvanceReceiptAvailability();
+  syncAuthModeFromLocation();
   renderAuthMode();
 
   const sessionResponse = await api("/api/auth/me");
@@ -145,6 +161,8 @@ async function boot() {
 function bindEvents() {
   elements.authForm.addEventListener("submit", handleAuthSubmit);
   elements.authToggleMode.addEventListener("click", toggleAuthMode);
+  elements.forgotPasswordButton?.addEventListener("click", openForgotPasswordMode);
+  elements.authBackToLoginButton?.addEventListener("click", () => setAuthMode("login"));
   elements.quickMenuToggle?.addEventListener("click", toggleQuickMenu);
   elements.gigDiaryCloseButton?.addEventListener("click", closeGigDiaryModal);
   elements.gigSearchInput?.addEventListener("input", handleGigSearchInput);
@@ -176,6 +194,9 @@ function bindEvents() {
   elements.googleDisconnectButton.addEventListener("click", handleGoogleDisconnect);
   elements.googleImportButton.addEventListener("click", handleGoogleImport);
   elements.profileForm?.addEventListener("submit", handleProfileSubmit);
+  elements.profilePasswordForm?.addEventListener("submit", handleProfilePasswordSubmit);
+  elements.changePasswordToggleButton?.addEventListener("click", openProfilePasswordForm);
+  elements.cancelPasswordChangeButton?.addEventListener("click", closeProfilePasswordForm);
   elements.deleteAccountButton?.addEventListener("click", handleAccountDelete);
 
   elements.prevMonth.addEventListener("click", () => {
@@ -196,28 +217,53 @@ function bindEvents() {
 async function handleAuthSubmit(event) {
   event.preventDefault();
 
-  if (authMode === "register" && !isPasswordStrongEnough(elements.authPassword.value)) {
+  if ((authMode === "register" || authMode === "reset") && !isPasswordStrongEnough(elements.authPassword.value)) {
     elements.authStatus.textContent = "Lozinka mora imati najmanje 8 znakova i barem jedan broj.";
     return;
   }
 
-  if (authMode === "register" && elements.authPassword.value !== elements.authPasswordConfirm.value) {
+  if ((authMode === "register" || authMode === "reset") && elements.authPassword.value !== elements.authPasswordConfirm.value) {
     elements.authStatus.textContent = "Lozinke se ne podudaraju.";
     return;
   }
 
-  const payload = {
-    email: elements.authEmail.value.trim(),
-    password: elements.authPassword.value,
-  };
-
-  if (authMode === "register") {
-    payload.firstName = elements.authFirstName.value.trim();
-    payload.lastName = elements.authLastName.value.trim();
-    payload.phone = elements.authPhone.value.trim();
-  }
-
   try {
+    if (authMode === "forgot") {
+      const result = await api("/api/auth/forgot-password", {
+        method: "POST",
+        body: { email: elements.authEmail.value.trim() },
+      });
+      elements.authStatus.textContent = result?.message || "Ako racun postoji, poslali smo link za reset lozinke.";
+      return;
+    }
+
+    if (authMode === "reset") {
+      const result = await api("/api/auth/reset-password", {
+        method: "POST",
+        body: {
+          token: authResetToken,
+          password: elements.authPassword.value,
+        },
+      });
+      clearResetTokenFromLocation();
+      elements.authPassword.value = "";
+      elements.authPasswordConfirm.value = "";
+      setAuthMode("login");
+      elements.authStatus.textContent = result?.message || "Nova lozinka je spremljena.";
+      return;
+    }
+
+    const payload = {
+      email: elements.authEmail.value.trim(),
+      password: elements.authPassword.value,
+    };
+
+    if (authMode === "register") {
+      payload.firstName = elements.authFirstName.value.trim();
+      payload.lastName = elements.authLastName.value.trim();
+      payload.phone = elements.authPhone.value.trim();
+    }
+
     const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
     const result = await api(endpoint, {
       method: "POST",
@@ -225,7 +271,7 @@ async function handleAuthSubmit(event) {
     });
     if (authMode === "register") {
       elements.authStatus.textContent = result?.registrationEmailSent === false
-        ? "Racun je kreiran, ali registracijski email nije poslan. Provjeri SMTP postavke."
+        ? `Racun je kreiran, ali registracijski email nije poslan.${result?.registrationEmailError ? ` ${result.registrationEmailError}` : ""}`
         : "Racun je kreiran.";
     } else {
       elements.authStatus.textContent = "Prijava uspjesna.";
@@ -238,29 +284,98 @@ async function handleAuthSubmit(event) {
 }
 
 function toggleAuthMode() {
-  authMode = authMode === "login" ? "register" : "login";
-  renderAuthMode();
+  setAuthMode(authMode === "login" ? "register" : "login");
 }
 
 function renderAuthMode() {
   const isLogin = authMode === "login";
-  elements.authTitle.textContent = isLogin ? "Prijavi se u glazbeni dnevnik" : "Kreiraj novi racun";
-  elements.authSubmitButton.textContent = isLogin ? "Prijava" : "Registracija";
+  const isRegister = authMode === "register";
+  const isForgot = authMode === "forgot";
+  const isReset = authMode === "reset";
+
+  elements.authTitle.textContent = isLogin
+    ? "Prijavi se u glazbeni dnevnik"
+    : isRegister
+      ? "Kreiraj novi racun"
+      : isForgot
+        ? "Zaboravljena lozinka"
+        : "Postavi novu lozinku";
+  elements.authSubmitButton.textContent = isLogin
+    ? "Prijava"
+    : isRegister
+      ? "Registracija"
+      : isForgot
+        ? "Posalji link"
+        : "Spremi lozinku";
   elements.authToggleMode.textContent = isLogin ? "Nemam racun" : "Vec imam racun";
   elements.authStatus.textContent = isLogin
     ? "Prijavi se za nastavak."
-    : "Kreiraj racun za svoj dnevnik. Lozinka mora imati najmanje 8 znakova i barem jedan broj.";
-  elements.authRegisterFields.forEach((field) => field.classList.toggle("hidden", isLogin));
-  elements.authFirstName.required = !isLogin;
-  elements.authLastName.required = !isLogin;
-  elements.authPhone.required = !isLogin;
-  elements.authPasswordConfirm.required = !isLogin;
-  if (isLogin) {
+    : isRegister
+      ? "Kreiraj racun za svoj dnevnik. Lozinka mora imati najmanje 8 znakova i barem jedan broj."
+      : isForgot
+        ? "Upisi email i poslat cemo ti link za novu lozinku."
+        : "Unesi novu lozinku. Lozinka mora imati najmanje 8 znakova i barem jedan broj.";
+
+  elements.authEmailField?.classList.toggle("hidden", isReset);
+  elements.authPasswordField?.classList.toggle("hidden", isForgot);
+  elements.authPasswordConfirmField?.classList.toggle("hidden", !isRegister && !isReset);
+  elements.authRegisterFields.forEach((field) => field.classList.toggle("hidden", !isRegister));
+  elements.authToggleMode.classList.toggle("hidden", isForgot || isReset);
+  elements.forgotPasswordButton?.classList.toggle("hidden", !isLogin);
+  elements.authBackToLoginButton?.classList.toggle("hidden", !isForgot && !isReset);
+
+  elements.authEmail.required = !isReset;
+  elements.authPassword.required = !isForgot;
+  elements.authFirstName.required = isRegister;
+  elements.authLastName.required = isRegister;
+  elements.authPhone.required = isRegister;
+  elements.authPasswordConfirm.required = isRegister || isReset;
+
+  if (!isRegister) {
     elements.authFirstName.value = "";
     elements.authLastName.value = "";
     elements.authPhone.value = "";
+  }
+
+  if (isLogin || isForgot) {
     elements.authPasswordConfirm.value = "";
   }
+}
+
+function setAuthMode(nextMode) {
+  authMode = nextMode;
+  if (nextMode !== "reset") {
+    authResetToken = "";
+    if (nextMode === "login" || nextMode === "register" || nextMode === "forgot") {
+      clearResetTokenFromLocation();
+    }
+  }
+  renderAuthMode();
+}
+
+function openForgotPasswordMode() {
+  setAuthMode("forgot");
+}
+
+function syncAuthModeFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const resetToken = params.get("resetToken");
+  if (resetToken) {
+    authResetToken = resetToken;
+    authMode = "reset";
+  }
+}
+
+function clearResetTokenFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("resetToken")) {
+    return;
+  }
+
+  params.delete("resetToken");
+  const query = params.toString();
+  const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash || ""}`;
+  history.replaceState(null, "", nextUrl);
 }
 
 function isPasswordStrongEnough(password) {
@@ -272,6 +387,8 @@ async function handleLogout() {
   state = structuredClone(initialState);
   googleCalendarRuntime.accessToken = null;
   googleCalendarRuntime.tokenClient = null;
+  authMode = "login";
+  authResetToken = "";
   renderAuthOnly();
 }
 
@@ -303,6 +420,8 @@ function applyBootstrapState(data) {
 }
 
 function renderAuthOnly() {
+  syncAuthModeFromLocation();
+  renderAuthMode();
   elements.authShell.classList.remove("hidden");
   elements.appShell.classList.add("hidden");
   closeQuickMenu();
@@ -342,6 +461,7 @@ function render() {
     elements.profilePrimaryBandInput.value = state.user?.primaryBand || "";
     elements.profilePrimaryInstrumentInput.value = state.user?.primaryInstrument || "";
   }
+  closeProfilePasswordForm();
   renderGoogleCalendarControls();
   renderHeroStats();
   renderSuggestions();
@@ -1336,6 +1456,61 @@ async function handleAccountDelete() {
     googleCalendarRuntime.accessToken = null;
     googleCalendarRuntime.tokenClient = null;
     renderAuthOnly();
+  } catch (error) {
+    elements.profileStatus.textContent = error.message;
+    elements.profileStatus.classList.remove("hidden");
+  }
+}
+
+function openProfilePasswordForm() {
+  elements.profilePasswordForm?.classList.remove("hidden");
+  elements.currentPasswordInput?.focus();
+}
+
+function closeProfilePasswordForm() {
+  elements.profilePasswordForm?.classList.add("hidden");
+  if (elements.currentPasswordInput) {
+    elements.currentPasswordInput.value = "";
+  }
+  if (elements.newPasswordInput) {
+    elements.newPasswordInput.value = "";
+  }
+  if (elements.confirmNewPasswordInput) {
+    elements.confirmNewPasswordInput.value = "";
+  }
+}
+
+async function handleProfilePasswordSubmit(event) {
+  event.preventDefault();
+
+  const currentPassword = elements.currentPasswordInput?.value || "";
+  const newPassword = elements.newPasswordInput?.value || "";
+  const confirmNewPassword = elements.confirmNewPasswordInput?.value || "";
+
+  if (!isPasswordStrongEnough(newPassword)) {
+    elements.profileStatus.textContent = "Nova lozinka mora imati najmanje 8 znakova i barem jedan broj.";
+    elements.profileStatus.classList.remove("hidden");
+    return;
+  }
+
+  if (newPassword !== confirmNewPassword) {
+    elements.profileStatus.textContent = "Nove lozinke se ne podudaraju.";
+    elements.profileStatus.classList.remove("hidden");
+    return;
+  }
+
+  try {
+    const result = await api("/api/profile/password", {
+      method: "POST",
+      body: {
+        currentPassword,
+        newPassword,
+      },
+    });
+
+    closeProfilePasswordForm();
+    elements.profileStatus.textContent = result?.message || "Lozinka je uspjesno promijenjena.";
+    elements.profileStatus.classList.remove("hidden");
   } catch (error) {
     elements.profileStatus.textContent = error.message;
     elements.profileStatus.classList.remove("hidden");

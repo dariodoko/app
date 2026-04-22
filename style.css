@@ -295,9 +295,17 @@ textarea {
   margin-top: 8px;
 }
 
+.auth-secondary-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 .tab-button,
 .primary-button,
 .ghost-button,
+.text-button,
 .icon-button,
 .danger-button {
   border: 0;
@@ -333,6 +341,15 @@ textarea {
   min-height: 54px;
 }
 
+.text-button {
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .icon-button {
   width: 42px;
   height: 42px;
@@ -362,8 +379,14 @@ textarea {
 }
 
 .ghost-button:hover,
+.text-button:hover,
 .icon-button:hover {
   box-shadow: var(--shadow-soft);
+}
+
+.text-button:hover {
+  color: var(--text);
+  transform: none;
 }
 
 #authStatus,
@@ -1520,6 +1543,7 @@ main {
   .user-bar,
   .user-bar-actions,
   .auth-actions,
+  .auth-secondary-actions,
   .auth-footer {
     flex-direction: column;
     align-items: stretch;
@@ -1635,6 +1659,11 @@ main {
 
   .auth-actions {
     gap: 10px;
+  }
+
+  .auth-secondary-actions {
+    gap: 8px;
+    text-align: center;
   }
 
   .auth-actions .primary-button,
@@ -1978,6 +2007,23 @@ body::after {
   box-shadow: 0 12px 26px rgba(142, 152, 182, 0.14);
 }
 
+.account-chip-link {
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.account-chip-link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 32px rgba(142, 152, 182, 0.18);
+}
+
+.account-chip-link:focus-visible {
+  outline: 2px solid rgba(90, 141, 255, 0.35);
+  outline-offset: 3px;
+}
+
 .account-avatar {
   display: grid;
   place-items: center;
@@ -2286,6 +2332,15 @@ textarea:focus {
 
 .profile-form {
   margin-bottom: 18px;
+}
+
+.profile-password-form {
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(126, 142, 180, 0.12);
+  box-shadow: 0 14px 28px rgba(142, 152, 182, 0.12);
 }
 
 .profile-form + #profileStatus {

@@ -312,6 +312,11 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, HOST, async () => {
+  const removedImportedBandCount = await cleanupImportedGoogleBands();
+  if (removedImportedBandCount > 0) {
+    console.log(`Uklonjeno ${removedImportedBandCount} spremljenih bendova koji su postojali samo zbog Google Calendar importa.`);
+  }
+
   console.log(`Glazbeni dnevnik backend radi na http://${HOST}:${PORT}`);
 });
 
@@ -1202,7 +1207,9 @@ async function listGigs(userId) {
 
 async function createGig(userId, payload, forcedId = null) {
   const gig = normalizeGigPayload(payload);
-  await ensureBandExists(userId, gig.bandName);
+  if (shouldPersistGigBand(gig)) {
+    await ensureBandExists(userId, gig.bandName);
+  }
 
   const row = {
     id: forcedId || crypto.randomUUID(),
@@ -1229,8 +1236,11 @@ async function updateGig(userId, gigId, payload) {
       throw createHttpError(404, "Nastup nije pronaden.");
     }
 
-    // Google Calendar imports must never populate the saved band directory.
-    if (existing.source !== "google-import" && gig.bandName) {
+    if (!asString(payload.source) && existing.source) {
+      gig.source = existing.source;
+    }
+
+    if (shouldPersistGigBand(gig) && gig.bandName) {
       const alreadySaved = data.bands.some((band) => (
         band.userId === userId
         && asString(band.name).toLocaleLowerCase("hr") === gig.bandName.toLocaleLowerCase("hr")
@@ -1508,6 +1518,82 @@ function normalizeSettings(payload) {
   return {
     calendarId: asString(payload.calendarId) || "primary",
   };
+}
+
+function shouldPersistGigBand(gig) {
+  return gig?.source !== "google-import";
+}
+
+async function cleanupImportedGoogleBands() {
+  let removedCount = 0;
+
+  await updateData((data) => {
+    if (!Array.isArray(data.bands) || !data.bands.length) {
+      return;
+    }
+
+    const manualGigBandNamesByUser = new Map();
+    const googleGigBandNamesByUser = new Map();
+    const protectedBandNamesByUser = new Map();
+
+    const rememberName = (bucket, userId, name) => {
+      const normalizedName = asString(name).toLocaleLowerCase("hr");
+      if (!userId || !normalizedName) {
+        return;
+      }
+
+      if (!bucket.has(userId)) {
+        bucket.set(userId, new Set());
+      }
+
+      bucket.get(userId).add(normalizedName);
+    };
+
+    data.gigs.forEach((gig) => {
+      const source = asString(gig?.source) || "manual";
+      if (source === "google-import") {
+        rememberName(googleGigBandNamesByUser, gig.userId, gig.bandName);
+        return;
+      }
+
+      rememberName(manualGigBandNamesByUser, gig.userId, gig.bandName);
+    });
+
+    data.users.forEach((user) => {
+      rememberName(protectedBandNamesByUser, user.id, user.primaryBand);
+    });
+
+    const nextBands = data.bands.filter((band) => {
+      const normalizedName = asString(band?.name).toLocaleLowerCase("hr");
+      if (!band?.userId || !normalizedName) {
+        return true;
+      }
+
+      const manualNames = manualGigBandNamesByUser.get(band.userId);
+      if (manualNames?.has(normalizedName)) {
+        return true;
+      }
+
+      const protectedNames = protectedBandNamesByUser.get(band.userId);
+      if (protectedNames?.has(normalizedName)) {
+        return true;
+      }
+
+      const googleNames = googleGigBandNamesByUser.get(band.userId);
+      if (googleNames?.has(normalizedName)) {
+        removedCount += 1;
+        return false;
+      }
+
+      return true;
+    });
+
+    if (removedCount > 0) {
+      data.bands = nextBands;
+    }
+  });
+
+  return removedCount;
 }
 
 async function ensureBandExists(userId, name) {

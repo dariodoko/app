@@ -348,6 +348,13 @@
               <p class="eyebrow">Unos nastupa</p>
               <h2>Novi zapis u dnevniku</h2>
             </div>
+            <button
+              type="button"
+              id="gigComposerCloseButton"
+              class="icon-button gig-composer-close"
+              aria-label="Zatvori unos nastupa"
+              title="Zatvori"
+            >&times;</button>
           </div>
 
           <form id="gigForm" class="form-grid">
@@ -626,7 +633,7 @@
           </div>
         </section>
         <div class="layout-grid profile-layout">
-          <section class="panel accent-panel">
+          <section class="panel accent-panel profile-main-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Moj profil</p>
@@ -640,6 +647,14 @@
                 <p class="meta">Aktivni korisnički račun za upravljanje nastupima, financijama i opremom.</p>
               </div>
             </div>
+            <div class="profile-section-block">
+              <div class="profile-section-heading">
+                <div>
+                  <p class="eyebrow">Osnovni podaci</p>
+                  <h3>Uredi profil</h3>
+                </div>
+                <p class="meta">Ažuriraj kontaktne informacije, glavni bend i instrument.</p>
+              </div>
             <form id="profileForm" class="form-grid profile-form">
               <label>
                 Ime
@@ -674,6 +689,7 @@
                   <button type="button" id="deleteAccountButton" class="danger-button">Obrisi račun</button>
                 </div>
               </form>
+            </div>
             <form id="profilePasswordForm" class="form-grid profile-password-form hidden">
               <label>
                 Trenutna lozinka
@@ -692,52 +708,50 @@
                 <button type="button" id="cancelPasswordChangeButton" class="ghost-button">Odustani</button>
               </div>
             </form>
-            <section class="profile-utility-panel">
-              <div class="section-heading compact-heading">
-                <div>
-                  <p class="eyebrow">Backup</p>
-                  <h3>Izvoz podataka</h3>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button type="button" id="profileBackupPdfButton" class="ghost-button">Backup svih podataka (PDF)</button>
-              </div>
-            </section>
-            <section class="profile-utility-panel">
-              <div class="section-heading compact-heading">
-                <div>
-                  <p class="eyebrow">Google kalendar</p>
-                  <h3>Diskretne akcije</h3>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button type="button" id="profileGoogleReconnectButton" class="ghost-button">Ponovno poveži Google</button>
-                <button type="button" id="profileGoogleImportButton" class="ghost-button">Uvezi Google nastupe</button>
-              </div>
-            </section>
-            <section class="profile-utility-panel">
-              <div class="section-heading compact-heading">
-                <div>
-                  <p class="eyebrow">Sigurnost kalendara</p>
-                  <h3>Brisanje svih događaja</h3>
-                </div>
-              </div>
-              <p class="meta">Ova akcija briše sve nastupe iz aplikacije i traži potvrdu lozinkom.</p>
-              <div class="form-actions">
-                <button type="button" id="showClearGigsFormButton" class="danger-button">Obriši sve događaje</button>
-              </div>
-              <form id="clearGigsForm" class="form-grid profile-password-form hidden">
-                <label class="full-width">
-                  Potvrdi lozinkom
-                  <input type="password" id="clearGigsPasswordInput" placeholder="Unesite lozinku za potvrdu">
-                </label>
-                <div class="full-width form-actions">
-                  <button type="submit" class="danger-button">Potvrdi brisanje</button>
-                  <button type="button" id="cancelClearGigsButton" class="ghost-button">Odustani</button>
-                </div>
-              </form>
-            </section>
             <p id="profileStatus" class="google-calendar-status hidden"></p>
+            <div class="profile-section-block">
+              <div class="profile-section-heading">
+                <div>
+                  <p class="eyebrow">Sažetak korisnika</p>
+                  <h3>Pregled spremljenih informacija</h3>
+                </div>
+              </div>
+              <div class="detail-grid profile-detail-grid profile-info-grid">
+              <article class="detail-item">
+                <span>Ime</span>
+                <strong id="profileFirstName">-</strong>
+              </article>
+              <article class="detail-item">
+                <span>Prezime</span>
+                <strong id="profileLastName">-</strong>
+              </article>
+              <article class="detail-item">
+                <span>Adresa</span>
+                <strong id="profileAddress">-</strong>
+              </article>
+              <article class="detail-item">
+                <span>Broj mobitela</span>
+                <strong id="profilePhone">-</strong>
+              </article>
+              <article class="detail-item">
+                <span>Glavni bend</span>
+                <strong id="profilePrimaryBand">-</strong>
+              </article>
+              <article class="detail-item">
+                <span>Glavni instrument</span>
+                <strong id="profilePrimaryInstrument">-</strong>
+              </article>
+            </div>
+            </div>
+          </section>
+
+          <section class="panel profile-side-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Status i alati</p>
+                <h2>Brzi pregled</h2>
+              </div>
+            </div>
             <section class="billing-panel profile-billing-panel" id="profileBillingPanel">
               <div class="section-heading compact-heading">
                 <div>
@@ -770,7 +784,7 @@
                 <button type="button" id="profileStartCheckoutButton" class="primary-button">Kupi licencu 25,00 EUR</button>
               </div>
             </section>
-            <div class="detail-grid profile-detail-grid">
+            <div class="detail-grid profile-detail-grid profile-account-grid">
               <article class="detail-item">
                 <span>Status računa</span>
                 <strong>Aktivan</strong>
@@ -787,41 +801,6 @@
                 <span>Sigurnost profila</span>
                 <strong>Sigurna prijava</strong>
               </article>
-            </div>
-            <div class="detail-grid profile-detail-grid profile-info-grid">
-              <article class="detail-item">
-                <span>Ime</span>
-                <strong id="profileFirstName">-</strong>
-              </article>
-              <article class="detail-item">
-                <span>Prezime</span>
-                <strong id="profileLastName">-</strong>
-              </article>
-              <article class="detail-item">
-                <span>Adresa</span>
-                <strong id="profileAddress">-</strong>
-              </article>
-              <article class="detail-item">
-                <span>Broj mobitela</span>
-                <strong id="profilePhone">-</strong>
-              </article>
-              <article class="detail-item">
-                <span>Glavni bend</span>
-                <strong id="profilePrimaryBand">-</strong>
-              </article>
-              <article class="detail-item">
-                <span>Glavni instrument</span>
-                <strong id="profilePrimaryInstrument">-</strong>
-              </article>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Brži pregled nastupa</p>
-                <h2>Što je trenutno najvaznije</h2>
-              </div>
             </div>
             <div class="metric-grid">
               <article class="metric-card">
@@ -840,6 +819,55 @@
                 <span>Workspace</span>
                 <strong>Sve na jednom mjestu</strong>
               </article>
+            </div>
+            <div class="profile-utility-grid">
+              <section class="profile-utility-panel">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <p class="eyebrow">Backup</p>
+                    <h3>Izvoz podataka</h3>
+                  </div>
+                </div>
+                <p class="meta">Pripremi pregled svih podataka za spremanje ili arhivu.</p>
+                <div class="form-actions">
+                  <button type="button" id="profileBackupPdfButton" class="ghost-button">Backup svih podataka (PDF)</button>
+                </div>
+              </section>
+              <section class="profile-utility-panel">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <p class="eyebrow">Google kalendar</p>
+                    <h3>Sinkronizacija</h3>
+                  </div>
+                </div>
+                <p class="meta">Ponovno poveži račun ili ručno pokreni novi read-only uvoz.</p>
+                <div class="form-actions">
+                  <button type="button" id="profileGoogleReconnectButton" class="ghost-button">Ponovno poveži Google</button>
+                  <button type="button" id="profileGoogleImportButton" class="ghost-button">Uvezi Google nastupe</button>
+                </div>
+              </section>
+              <section class="profile-utility-panel profile-danger-panel">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <p class="eyebrow">Sigurnost kalendara</p>
+                    <h3>Brisanje svih događaja</h3>
+                  </div>
+                </div>
+                <p class="meta">Ova akcija briše sve nastupe iz aplikacije i traži potvrdu lozinkom.</p>
+                <div class="form-actions">
+                  <button type="button" id="showClearGigsFormButton" class="danger-button">Obriši sve događaje</button>
+                </div>
+                <form id="clearGigsForm" class="form-grid profile-password-form hidden">
+                  <label class="full-width">
+                    Potvrdi lozinkom
+                    <input type="password" id="clearGigsPasswordInput" placeholder="Unesite lozinku za potvrdu">
+                  </label>
+                  <div class="full-width form-actions">
+                    <button type="submit" class="danger-button">Potvrdi brisanje</button>
+                    <button type="button" id="cancelClearGigsButton" class="ghost-button">Odustani</button>
+                  </div>
+                </form>
+              </section>
             </div>
           </section>
         </div>

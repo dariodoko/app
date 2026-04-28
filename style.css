@@ -1054,6 +1054,15 @@ textarea {
   font-weight: 700;
 }
 
+.gig-composer-close {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
 .tabs {
   display: inline-flex;
   gap: 8px;
@@ -1592,11 +1601,20 @@ main {
 }
 
 .profile-utility-panel {
-  margin-top: 18px;
+  margin-top: 0;
   padding: 18px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(163, 177, 255, 0.1);
+}
+
+.profile-utility-panel .meta {
+  margin: 0 0 12px;
+}
+
+.profile-danger-panel {
+  border-color: rgba(217, 122, 122, 0.18);
+  background: linear-gradient(180deg, rgba(217, 122, 122, 0.08), rgba(255, 255, 255, 0.03));
 }
 
 .auth-brand-logo {
@@ -3079,7 +3097,15 @@ textarea:focus {
 }
 
 .profile-layout {
-  grid-template-columns: 1.05fr 0.95fr;
+  grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
+  align-items: start;
+  gap: 24px;
+}
+
+.profile-main-panel,
+.profile-side-panel {
+  display: grid;
+  gap: 20px;
 }
 
 .profile-card {
@@ -3094,12 +3120,41 @@ textarea:focus {
   box-shadow: 0 14px 28px rgba(142, 152, 182, 0.12);
 }
 
+.profile-section-block {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(244, 247, 255, 0.94));
+  border: 1px solid rgba(126, 142, 180, 0.14);
+  box-shadow: 0 14px 28px rgba(142, 152, 182, 0.1);
+}
+
+.profile-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.profile-section-heading h3 {
+  margin: 0;
+  color: #182544;
+  font-size: 1.18rem;
+}
+
+.profile-section-heading .meta {
+  margin: 0;
+  max-width: 30ch;
+  text-align: right;
+}
+
 .profile-form {
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 
 .profile-password-form {
-  margin-bottom: 18px;
+  margin-bottom: 0;
   padding: 18px;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.82);
@@ -3107,9 +3162,8 @@ textarea:focus {
   box-shadow: 0 14px 28px rgba(142, 152, 182, 0.12);
 }
 
-.profile-form + #profileStatus {
-  margin-top: 0;
-  margin-bottom: 18px;
+#profileStatus {
+  margin: 0;
 }
 
 .profile-avatar-large {
@@ -3137,10 +3191,20 @@ textarea:focus {
 
 .profile-detail-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .profile-info-grid {
-  margin-top: 18px;
+  margin-top: 0;
+}
+
+.profile-account-grid {
+  margin-top: -2px;
+}
+
+.profile-utility-grid {
+  display: grid;
+  gap: 16px;
 }
 
 .modal-backdrop {
@@ -3188,6 +3252,15 @@ textarea:focus {
 
   .profile-layout {
     grid-template-columns: 1fr;
+  }
+
+  .profile-section-heading {
+    align-items: start;
+  }
+
+  .profile-section-heading .meta {
+    max-width: none;
+    text-align: left;
   }
 }
 
@@ -3432,8 +3505,8 @@ textarea:focus {
 
   .sidebar-nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
     width: 100%;
     padding: 0;
   }
@@ -3467,13 +3540,24 @@ textarea:focus {
 
   .user-bar-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: stretch;
     width: 100%;
+  }
+
+  .account-chip {
+    grid-column: 1 / -1;
   }
 
   .account-chip,
   .user-bar .danger-button {
     width: 100%;
+  }
+
+  .user-bar-add-button,
+  .user-bar .danger-button {
+    min-height: 52px;
   }
 
   .hero,
@@ -3496,7 +3580,10 @@ textarea:focus {
     margin-top: 12px;
   }
 
-  .hero-stats,
+  .hero-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .metric-grid,
   .layout-grid,
   .finances-grid,
@@ -3548,6 +3635,18 @@ textarea:focus {
   .google-calendar-grid {
     grid-template-columns: 1fr;
     gap: 14px;
+  }
+
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+  }
+
+  .tab-button {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
   }
 
   .form-actions,
@@ -3612,9 +3711,18 @@ textarea:focus {
     font-size: 1.1rem;
   }
 
+  .recent-gig-card,
+  .profile-section-block {
+    padding: 18px;
+  }
+
+  .billing-panel.profile-billing-panel .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .modal-panel {
     width: min(100% - 18px, 980px);
-    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
     border-radius: 24px;
   }
 }
@@ -3830,6 +3938,15 @@ textarea:focus {
     font-size: 1.38rem;
   }
 
+  .user-bar-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .user-bar-add-button,
+  .user-bar .danger-button {
+    width: 100%;
+  }
+
   .hero-copy,
   .section-intro .hero-copy,
   .user-bar .hero-copy,
@@ -3858,6 +3975,11 @@ textarea:focus {
 
   .calendar-day strong {
     font-size: 0.68rem;
+  }
+
+  .hero-stats,
+  .billing-panel.profile-billing-panel .detail-grid {
+    grid-template-columns: 1fr;
   }
 
   .empty-state,
@@ -3953,6 +4075,15 @@ textarea:focus {
   .profile-utility-panel,
   .profile-password-form {
     padding: 14px;
+  }
+
+  .profile-main-panel,
+  .profile-side-panel {
+    gap: 16px;
+  }
+
+  .profile-section-block {
+    gap: 14px;
   }
 
   .empty-state {
@@ -4357,6 +4488,12 @@ select {
 
   .sidebar-tab.active {
     transform: translateY(-2px) scale(1.01);
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
   }
 }
 

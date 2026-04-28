@@ -17,7 +17,6 @@ const DEFAULT_BAND_DIRECTORY = [
   "BOSUTSKI BEĆARI",
   "DYACO",
   "GRUPA DELTA PLOČE",
-  "INSTAGRAM",
   "JAKOV JOZINOVIĆ BEND",
   "JELENA ROZGA BEND",
   "MATE BULIĆ BEND",
@@ -172,6 +171,7 @@ const elements = {
   tabs: [...document.querySelectorAll(".tab-button")],
   panels: [...document.querySelectorAll(".tab-panel")],
   gigComposerSection: document.getElementById("gigComposerSection"),
+  gigComposerCloseButton: document.getElementById("gigComposerCloseButton"),
   gigForm: document.getElementById("gigForm"),
   gigId: document.getElementById("gigId"),
   gigSubmitButton: document.getElementById("gigSubmitButton"),
@@ -320,6 +320,10 @@ function bindEvents() {
 
   elements.gigForm.addEventListener("submit", handleGigSubmit);
   elements.gigPrintReceiptButton?.addEventListener("click", handleAdvanceReceiptPrint);
+  elements.gigComposerCloseButton?.addEventListener("click", () => {
+    resetGigForm();
+    hideGigComposer();
+  });
   elements.gigCancelEditButton.addEventListener("click", () => {
     resetGigForm();
     hideGigComposer();
@@ -1375,26 +1379,43 @@ function getCombinedBandDirectory() {
   const names = new Map();
 
   DEFAULT_BAND_DIRECTORY.forEach((name) => {
-    if (name) {
+    if (isLikelyBandName(name)) {
       names.set(name.trim().toLocaleLowerCase("hr"), name.trim());
     }
   });
 
   state.bandDirectory.forEach((band) => {
     const name = typeof band === "string" ? band.trim() : band?.name?.trim();
-    if (name) {
+    if (isLikelyBandName(name)) {
       names.set(name.toLocaleLowerCase("hr"), name);
     }
   });
 
   state.bands.forEach((band) => {
     const name = band?.name?.trim();
-    if (name) {
+    if (isLikelyBandName(name)) {
       names.set(name.toLocaleLowerCase("hr"), name);
     }
   });
 
   return [...names.values()].sort(localeSort);
+}
+
+function isLikelyBandName(value) {
+  const name = String(value || "").trim();
+  if (!name) {
+    return false;
+  }
+
+  if (name.toLocaleLowerCase("hr") === "instagram") {
+    return false;
+  }
+
+  return !(
+    /@|https?:\/\/|www\./i.test(name)
+    || /\+\d[\d\s/.-]{5,}/.test(name)
+    || /\d[\d\s/.-]{6,}/.test(name)
+  );
 }
 
 function renderSuggestions() {

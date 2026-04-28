@@ -314,7 +314,7 @@ const server = http.createServer(async (request, response) => {
 server.listen(PORT, HOST, async () => {
   const removedImportedBandCount = await cleanupImportedGoogleBands();
   if (removedImportedBandCount > 0) {
-    console.log(`Uklonjeno ${removedImportedBandCount} spremljenih bendova koji su postojali samo zbog Google Calendar importa.`);
+    console.log(`Uklonjeno ${removedImportedBandCount} neispravnih ili Google-import bend unosa.`);
   }
 
   console.log(`Glazbeni dnevnik backend radi na http://${HOST}:${PORT}`);
@@ -1107,14 +1107,14 @@ async function listBandDirectory() {
 
   data.bandDirectory.forEach((entry) => {
     const name = asString(entry?.name ?? entry);
-    if (name) {
+    if (isLikelyBandName(name)) {
       names.add(name);
     }
   });
 
   data.bands.forEach((band) => {
     const name = asString(band.name);
-    if (name) {
+    if (isLikelyBandName(name)) {
       names.add(name);
     }
   });
@@ -1528,10 +1528,6 @@ async function cleanupImportedGoogleBands() {
   let removedCount = 0;
 
   await updateData((data) => {
-    if (!Array.isArray(data.bands) || !data.bands.length) {
-      return;
-    }
-
     const manualGigBandNamesByUser = new Map();
     const googleGigBandNamesByUser = new Map();
     const protectedBandNamesByUser = new Map();
@@ -1569,6 +1565,11 @@ async function cleanupImportedGoogleBands() {
         return true;
       }
 
+      if (!isLikelyBandName(band.name)) {
+        removedCount += 1;
+        return false;
+      }
+
       const manualNames = manualGigBandNamesByUser.get(band.userId);
       if (manualNames?.has(normalizedName)) {
         return true;
@@ -1588,8 +1589,26 @@ async function cleanupImportedGoogleBands() {
       return true;
     });
 
-    if (removedCount > 0) {
+    const nextBandDirectory = (Array.isArray(data.bandDirectory) ? data.bandDirectory : []).filter((entry) => {
+      const name = asString(entry?.name ?? entry);
+      if (!name) {
+        return false;
+      }
+
+      if (!isLikelyBandName(name)) {
+        removedCount += 1;
+        return false;
+      }
+
+      return true;
+    });
+
+    if (data.bands.length !== nextBands.length) {
       data.bands = nextBands;
+    }
+
+    if ((Array.isArray(data.bandDirectory) ? data.bandDirectory.length : 0) !== nextBandDirectory.length) {
+      data.bandDirectory = nextBandDirectory.map((entry) => ({ name: asString(entry?.name ?? entry) }));
     }
   });
 
@@ -2013,6 +2032,23 @@ function getIdFromPath(pathname) {
 
 function asString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isLikelyBandName(value) {
+  const name = asString(value);
+  if (!name) {
+    return false;
+  }
+
+  if (name.toLocaleLowerCase("hr") === "instagram") {
+    return false;
+  }
+
+  return !(
+    /@|https?:\/\/|www\./i.test(name)
+    || /\+\d[\d\s/.-]{5,}/.test(name)
+    || /\d[\d\s/.-]{6,}/.test(name)
+  );
 }
 
 function asNumber(value) {

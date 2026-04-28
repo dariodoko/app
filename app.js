@@ -155,6 +155,7 @@ const elements = {
   newPasswordInput: document.getElementById("newPasswordInput"),
   confirmNewPasswordInput: document.getElementById("confirmNewPasswordInput"),
   hero: document.querySelector(".hero"),
+  recentCompletedGigs: document.getElementById("recentCompletedGigs"),
   quickMenuToggle: document.getElementById("quickMenuToggle"),
   quickMenuPanel: document.getElementById("quickMenuPanel"),
   gigDiaryModal: document.getElementById("gigDiaryModal"),
@@ -170,6 +171,7 @@ const elements = {
   seedDemoButton: document.getElementById("seedDemoButton"),
   tabs: [...document.querySelectorAll(".tab-button")],
   panels: [...document.querySelectorAll(".tab-panel")],
+  gigComposerSection: document.getElementById("gigComposerSection"),
   gigForm: document.getElementById("gigForm"),
   gigId: document.getElementById("gigId"),
   gigSubmitButton: document.getElementById("gigSubmitButton"),
@@ -318,7 +320,10 @@ function bindEvents() {
 
   elements.gigForm.addEventListener("submit", handleGigSubmit);
   elements.gigPrintReceiptButton?.addEventListener("click", handleAdvanceReceiptPrint);
-  elements.gigCancelEditButton.addEventListener("click", resetGigForm);
+  elements.gigCancelEditButton.addEventListener("click", () => {
+    resetGigForm();
+    hideGigComposer();
+  });
   elements.equipmentForm.addEventListener("submit", handleEquipmentSubmit);
   elements.equipmentCancelEditButton.addEventListener("click", resetEquipmentForm);
 
@@ -352,6 +357,7 @@ function bindEvents() {
   });
 
   document.addEventListener("click", handleDocumentClick);
+  document.addEventListener("keydown", handleDocumentKeydown);
 }
 
 async function handleAuthSubmit(event) {
@@ -692,6 +698,7 @@ function render() {
   closeProfilePasswordForm();
   renderGoogleCalendarControls();
   renderHeroStats();
+  renderRecentCompletedGigs();
   renderSuggestions();
   renderHomeGigSearchResults();
   renderGigDiary();
@@ -993,7 +1000,9 @@ function handleDocumentClick(event) {
   const diaryEditButton = event.target.closest("[data-diary-edit]");
   const closeDiaryButton = event.target.closest("[data-close-diary]");
   const openGigButton = event.target.closest("[data-open-gig]");
+  const createGigButton = event.target.closest("[data-create-gig-date]");
   const editGigButton = event.target.closest("[data-edit-gig]");
+  const fillGigEarningButton = event.target.closest("[data-fill-gig-earning]");
   const deleteGigButton = event.target.closest("[data-delete-gig]");
   const editEquipmentButton = event.target.closest("[data-edit-equipment]");
   const deleteEquipmentButton = event.target.closest("[data-delete-equipment]");
@@ -1019,6 +1028,11 @@ function handleDocumentClick(event) {
   if (diaryEditButton) {
     closeGigDiaryModal();
     startGigEdit(diaryEditButton.dataset.diaryEdit);
+    return;
+  }
+
+  if (fillGigEarningButton) {
+    openGigNetEarningEntry(fillGigEarningButton.dataset.fillGigEarning);
     return;
   }
 
@@ -1057,6 +1071,11 @@ function handleDocumentClick(event) {
 
   if (openGigButton) {
     openGigFromCalendar(openGigButton.dataset.openGig, openGigButton.dataset.openGigDate || "");
+    return;
+  }
+
+  if (createGigButton) {
+    startNewGigFromCalendar(createGigButton.dataset.createGigDate || "");
     return;
   }
 
@@ -1128,6 +1147,7 @@ async function handleGigSubmit(event) {
       openAdvanceReceiptPrint(savedGig);
     }
     resetGigForm();
+    hideGigComposer();
     render();
   } catch (error) {
     window.alert(error.message);
@@ -1140,6 +1160,7 @@ function startGigEdit(gigId) {
     return;
   }
 
+  showGigComposer();
   elements.gigId.value = gig.id;
   elements.bandName.value = gig.bandName;
   elements.gigDate.value = gig.date;
@@ -1158,6 +1179,51 @@ function startGigEdit(gigId) {
   elements.gigSubmitButton.textContent = "Spremi izmjene";
   elements.gigCancelEditButton.classList.remove("hidden");
   elements.gigForm.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function openGigNetEarningEntry(gigId) {
+  if (!gigId) {
+    return;
+  }
+
+  switchTab("nastupi");
+  startGigEdit(gigId);
+  requestAnimationFrame(() => {
+    elements.gigNetEarning?.focus();
+    elements.gigNetEarning?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
+function handleDocumentKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  const calendarDay = event.target.closest("[data-open-gig], [data-create-gig-date]");
+  if (!calendarDay) {
+    return;
+  }
+
+  event.preventDefault();
+
+  if (calendarDay.dataset.openGig) {
+    openGigFromCalendar(calendarDay.dataset.openGig, calendarDay.dataset.openGigDate || "");
+    return;
+  }
+
+  startNewGigFromCalendar(calendarDay.dataset.createGigDate || "");
+}
+
+function showGigComposer({ reset = false } = {}) {
+  if (reset) {
+    resetGigForm();
+  }
+
+  elements.gigComposerSection?.classList.remove("hidden");
+}
+
+function hideGigComposer() {
+  elements.gigComposerSection?.classList.add("hidden");
 }
 
 function registerServiceWorker() {
@@ -1273,6 +1339,36 @@ function renderHeroStats() {
   document.getElementById("heroGigCount").textContent = String(state.gigs.length);
   document.getElementById("heroRevenue").textContent = formatCurrency(totalRevenue);
   document.getElementById("heroEquipment").textContent = formatCurrency(equipmentNet);
+}
+
+function renderRecentCompletedGigs() {
+  if (!elements.recentCompletedGigs) {
+    return;
+  }
+
+  const recentCompletedGigs = [...state.gigs]
+    .filter((gig) => isPastDate(gig.date))
+    .sort(compareGigsByMostRecent)
+    .slice(0, 2);
+
+  if (!recentCompletedGigs.length) {
+    elements.recentCompletedGigs.className = "recent-gigs-list empty-state";
+    elements.recentCompletedGigs.textContent = "Još nema odrađenih nastupa za prikaz.";
+    return;
+  }
+
+  elements.recentCompletedGigs.className = "recent-gigs-list";
+  elements.recentCompletedGigs.innerHTML = recentCompletedGigs.map((gig) => `
+    <article class="recent-gig-card">
+      <div class="recent-gig-copy">
+        <strong>${escapeHtml(gig.bandName || "Nastup")}</strong>
+        <p class="meta">${escapeHtml(formatFullDate(gig.date))}${gig.time ? ` u ${escapeHtml(gig.time)}` : ""}</p>
+        <p class="meta">${escapeHtml(gig.location || "Lokacija nije upisana")}</p>
+        <p class="recent-gig-earning-status">${gig.netEarning == null ? "Zarada još nije unesena." : `Trenutno upisano: ${escapeHtml(formatCurrency(gig.netEarning))}`}</p>
+      </div>
+      <button type="button" class="primary-button small-button" data-fill-gig-earning="${escapeAttribute(gig.id)}">Unesi koliko si zaradio</button>
+    </article>
+  `).join("");
 }
 
 function getCombinedBandDirectory() {
@@ -1441,9 +1537,13 @@ function renderCalendar() {
       dayGigs.length ? "occupied" : "",
     ].filter(Boolean).join(" ");
     const firstGigId = dayGigs[0]?.id || "";
+    const isCurrentMonthDay = date.getMonth() === calendarState.month;
+    const interactiveAttributes = isCurrentMonthDay
+      ? `${firstGigId ? `data-open-gig="${firstGigId}" data-open-gig-date="${dateKey}"` : `data-create-gig-date="${dateKey}"`} role="button" tabindex="0"`
+      : "";
 
     html.push(`
-      <article class="${classes}" ${firstGigId ? `data-open-gig="${firstGigId}" data-open-gig-date="${dateKey}"` : ""}>
+      <article class="${classes}" ${interactiveAttributes}>
         <strong>${date.getDate()}</strong>
         ${dayGigs.length ? `<span class="calendar-day-dot" aria-hidden="true"></span>` : ""}
       </article>
@@ -1456,6 +1556,20 @@ function renderCalendar() {
 function openGigFromCalendar(gigId, dateKey = "") {
   switchTab("nastupi");
   openGigDiaryModal(gigId, { dateFilter: dateKey });
+}
+
+function startNewGigFromCalendar(dateKey) {
+  if (!dateKey) {
+    return;
+  }
+
+  switchTab("nastupi");
+  showGigComposer({ reset: true });
+  elements.gigDate.value = dateKey;
+  syncGigNetEarningAvailability();
+  syncAdvanceReceiptAvailability();
+  elements.bandName?.focus();
+  elements.gigForm?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderFinanceSummary() {
@@ -2166,6 +2280,10 @@ function handleQuickMenuAction(button) {
   }
 
   if (jumpSection) {
+    if (jumpSection === "gigForm") {
+      showGigComposer({ reset: true });
+    }
+
     requestAnimationFrame(() => {
       const target = document.getElementById(jumpSection);
       if (!target) {
@@ -3218,6 +3336,15 @@ function getWeekNumber(date) {
 
 function localeSort(a, b) {
   return a.localeCompare(b, "hr");
+}
+
+function compareGigsByMostRecent(a, b) {
+  const dateDiff = parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime();
+  if (dateDiff !== 0) {
+    return dateDiff;
+  }
+
+  return String(b.time || "").localeCompare(String(a.time || ""), "hr");
 }
 
 function sum(values) {

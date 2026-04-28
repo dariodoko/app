@@ -980,6 +980,59 @@ textarea {
   margin: 8px 0 0;
 }
 
+.recent-gigs-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.recent-gigs-heading {
+  align-items: end;
+  margin-bottom: 0;
+}
+
+.recent-gigs-meta {
+  margin: 0;
+  max-width: 28ch;
+  text-align: right;
+}
+
+.recent-gigs-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.recent-gig-card {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  padding: 18px 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(47, 43, 115, 0.08);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.recent-gig-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.recent-gig-copy strong {
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.recent-gig-copy .meta {
+  margin: 0;
+}
+
+.recent-gig-earning-status {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
 .tabs {
   display: inline-flex;
   gap: 8px;
@@ -1238,7 +1291,8 @@ main {
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
-.calendar-day[data-open-gig] {
+.calendar-day[data-open-gig],
+.calendar-day[data-create-gig-date] {
   cursor: pointer;
 }
 
@@ -3426,7 +3480,8 @@ textarea:focus {
   .layout-grid,
   .finances-grid,
   .profile-layout,
-  .detail-grid {
+  .detail-grid,
+  .recent-gigs-list {
     grid-template-columns: 1fr;
   }
 
@@ -3452,6 +3507,11 @@ textarea:focus {
 
   .section-heading {
     margin-bottom: 16px;
+  }
+
+  .recent-gigs-meta {
+    max-width: none;
+    text-align: left;
   }
 
   .section-intro {
@@ -4171,7 +4231,8 @@ a,
 .account-chip,
 .home-gig-result,
 .breakdown-row-action,
-.calendar-day[data-open-gig] {
+.calendar-day[data-open-gig],
+.calendar-day[data-create-gig-date] {
   -webkit-user-drag: none;
 }
 

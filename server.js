@@ -11,6 +11,14 @@ try {
   nodemailer = null;
 }
 
+let Stripe = null;
+try {
+  // Optional dependency: billing UI still works without Stripe setup.
+  Stripe = require("stripe");
+} catch (error) {
+  Stripe = null;
+}
+
 loadEnvFile();
 
 const HOST = process.env.HOST || "127.0.0.1";
@@ -24,6 +32,13 @@ const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER || "";
 const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || "Gazza Manager";
+const TRIAL_DAYS = Number.parseInt(process.env.TRIAL_DAYS || "7", 10);
+const BILLING_CURRENCY = (process.env.BILLING_CURRENCY || "eur").toLowerCase();
+const BILLING_PRICE_LABEL = process.env.BILLING_PRICE_LABEL || "25,00 EUR / 1 godina";
+const LICENSE_DURATION_DAYS = Number.parseInt(process.env.LICENSE_DURATION_DAYS || "365", 10);
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || "";
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 const SESSION_COOKIE = "glazbeni_dnevnik_session";
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "app-data.json");
@@ -31,13 +46,19 @@ const PUBLIC_FILES = new Set([
   "/index.html",
   "/style.css",
   "/app.js",
+  "/license-service.js",
   "/logo.jpg",
+  "/logo.png",
+  "/logo_trans.png",
+  "/ikona_bijela_transparent.png",
+  "/ikona_plava_transparent.png",
   "/icon-192.png",
   "/icon-512.png",
   "/manifest.webmanifest",
   "/service-worker.js",
 ]);
 let mailTransporter = null;
+let stripeClient = null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 ensureDataFile();
@@ -50,6 +71,11 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       return sendJson(response, 200, { ok: true });
+    }
+
+    if (url.pathname === "/api/stripe/webhook" && request.method === "POST") {
+      const rawBody = await readRawBody(request);
+      return handleStripeWebhook(request, response, rawBody);
     }
 
     if (url.pathname === "/api/auth/register" && request.method === "POST") {
@@ -72,9 +98,22 @@ const server = http.createServer(async (request, response) => {
       return handleResetPassword(response, body);
     }
 
+    if (url.pathname === "/api/public/billing/checkout-session" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return handlePublicCheckoutSession(request, response, body);
+    }
+
+    if (url.pathname === "/api/auth/complete-registration-checkout" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return handleCompleteRegistrationCheckout(request, response, body);
+    }
+
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
       await clearSession(cookies[SESSION_COOKIE]);
-      response.setHeader("Set-Cookie", buildExpiredSessionCookie(isSecureRequest(request)));
+      if (session?.userId) {
+        await clearUserSessions(session.userId);
+      }
+      response.setHeader("Set-Cookie", buildExpiredSessionCookies());
       return sendJson(response, 200, { ok: true });
     }
 
@@ -103,49 +142,85 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 401, { error: "Prijava je obavezna." });
     }
 
+    const sessionUser = await getUserById(session.userId);
+    if (!sessionUser) {
+      await clearSession(cookies[SESSION_COOKIE]);
+      response.setHeader("Set-Cookie", buildExpiredSessionCookies());
+      return sendJson(response, 401, { error: "Korisnicka sesija vise nije valjana." });
+    }
+
+    if (url.pathname === "/api/billing/status" && request.method === "GET") {
+      return sendJson(response, 200, buildBillingState(sessionUser));
+    }
+
+    if (url.pathname === "/api/billing/checkout-session" && request.method === "POST") {
+      return handleCreateCheckoutSession(request, response, sessionUser);
+    }
+
+    if (url.pathname === "/api/billing/restore" && request.method === "POST") {
+      return sendJson(response, 200, await handleRestorePurchases(sessionUser));
+    }
+
+    if (!hasUserAccess(sessionUser)) {
+      if (url.pathname.startsWith("/api/")) {
+        return sendJson(response, 402, {
+          error: "Licenca nije aktivna. Kupi ili obnovi licencu za nastavak rada.",
+          billing: buildBillingState(sessionUser),
+        });
+      }
+
+      if (request.method === "GET") {
+        return serveStatic(url.pathname, response);
+      }
+
+      return sendJson(response, 402, {
+        error: "Licenca nije aktivna. Kupi ili obnovi licencu za nastavak rada.",
+        billing: buildBillingState(sessionUser),
+      });
+    }
+
     if (url.pathname === "/api/bootstrap" && request.method === "GET") {
-      return sendJson(response, 200, await buildBootstrapState(session.userId));
+      return sendJson(response, 200, await buildBootstrapState(sessionUser.id));
     }
 
     if (url.pathname === "/api/settings" && request.method === "GET") {
-      return sendJson(response, 200, await getSettings(session.userId));
+      return sendJson(response, 200, await getSettings(sessionUser.id));
     }
 
     if (url.pathname === "/api/settings" && request.method === "PUT") {
       const body = await readJsonBody(request);
-      await saveSettings(session.userId, body);
-      return sendJson(response, 200, await getSettings(session.userId));
+      await saveSettings(sessionUser.id, body);
+      return sendJson(response, 200, await getSettings(sessionUser.id));
     }
 
     if (url.pathname === "/api/mail-test" && request.method === "POST") {
-      const user = await getUserById(session.userId);
-      const sent = await sendTestEmail(user);
+      const sent = await sendTestEmail(sessionUser);
       return sendJson(response, 200, {
         ok: sent,
         message: sent
-          ? `Testni email poslan na ${user?.email || "korisnika"}.`
+          ? `Testni email poslan na ${sessionUser?.email || "korisnika"}.`
           : "Testni email nije poslan. Provjeri SMTP postavke i server log.",
       });
     }
 
     if (url.pathname === "/api/profile" && (request.method === "PUT" || request.method === "POST")) {
       const body = await readJsonBody(request);
-      return sendJson(response, 200, { user: await updateUserProfile(session.userId, body) });
+      return sendJson(response, 200, { user: await updateUserProfile(sessionUser.id, body) });
     }
 
     if (url.pathname === "/api/profile/password" && request.method === "POST") {
       const body = await readJsonBody(request);
-      return handleProfilePasswordChange(response, session.userId, body);
+      return handleProfilePasswordChange(response, sessionUser.id, body);
     }
 
     if (url.pathname === "/api/profile" && request.method === "DELETE") {
-      await deleteUserAccount(session.userId);
+      await deleteUserAccount(sessionUser.id);
       response.setHeader("Set-Cookie", buildExpiredSessionCookie(isSecureRequest(request)));
       return sendJson(response, 200, { ok: true });
     }
 
     if (url.pathname === "/api/bands" && request.method === "GET") {
-      return sendJson(response, 200, await listBands(session.userId));
+      return sendJson(response, 200, await listBands(sessionUser.id));
     }
 
     if (url.pathname === "/api/band-directory" && request.method === "GET") {
@@ -154,70 +229,75 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/api/bands" && request.method === "POST") {
       const body = await readJsonBody(request);
-      return sendJson(response, 201, await createBand(session.userId, body));
+      return sendJson(response, 201, await createBand(sessionUser.id, body));
     }
 
     if (url.pathname.startsWith("/api/bands/") && request.method === "PUT") {
       const bandId = getIdFromPath(url.pathname);
       const body = await readJsonBody(request);
-      return sendJson(response, 200, await updateBand(session.userId, bandId, body));
+      return sendJson(response, 200, await updateBand(sessionUser.id, bandId, body));
     }
 
     if (url.pathname.startsWith("/api/bands/") && request.method === "DELETE") {
       const bandId = getIdFromPath(url.pathname);
-      await deleteBand(session.userId, bandId);
+      await deleteBand(sessionUser.id, bandId);
       return sendJson(response, 200, { ok: true });
     }
 
     if (url.pathname === "/api/gigs" && request.method === "GET") {
-      return sendJson(response, 200, await listGigs(session.userId));
+      return sendJson(response, 200, await listGigs(sessionUser.id));
     }
 
     if (url.pathname === "/api/gigs" && request.method === "POST") {
       const body = await readJsonBody(request);
-      return sendJson(response, 201, await createGig(session.userId, body));
+      return sendJson(response, 201, await createGig(sessionUser.id, body));
     }
 
     if (url.pathname === "/api/google-calendar/import" && request.method === "POST") {
       const body = await readJsonBody(request);
-      return sendJson(response, 200, await importGoogleCalendarGigs(session.userId, body));
+      return sendJson(response, 200, await importGoogleCalendarGigs(sessionUser.id, body));
     }
 
     if (url.pathname.startsWith("/api/gigs/") && request.method === "PUT") {
       const gigId = getIdFromPath(url.pathname);
       const body = await readJsonBody(request);
-      return sendJson(response, 200, await updateGig(session.userId, gigId, body));
+      return sendJson(response, 200, await updateGig(sessionUser.id, gigId, body));
     }
 
     if (url.pathname.startsWith("/api/gigs/") && request.method === "DELETE") {
       const gigId = getIdFromPath(url.pathname);
-      await deleteGig(session.userId, gigId);
+      await deleteGig(sessionUser.id, gigId);
       return sendJson(response, 200, { ok: true });
     }
 
+    if (url.pathname === "/api/gigs/clear" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return sendJson(response, 200, await clearAllGigs(sessionUser.id, body));
+    }
+
     if (url.pathname === "/api/equipment" && request.method === "GET") {
-      return sendJson(response, 200, await listEquipment(session.userId));
+      return sendJson(response, 200, await listEquipment(sessionUser.id));
     }
 
     if (url.pathname === "/api/equipment" && request.method === "POST") {
       const body = await readJsonBody(request);
-      return sendJson(response, 201, await createEquipment(session.userId, body));
+      return sendJson(response, 201, await createEquipment(sessionUser.id, body));
     }
 
     if (url.pathname.startsWith("/api/equipment/") && request.method === "PUT") {
       const equipmentId = getIdFromPath(url.pathname);
       const body = await readJsonBody(request);
-      return sendJson(response, 200, await updateEquipment(session.userId, equipmentId, body));
+      return sendJson(response, 200, await updateEquipment(sessionUser.id, equipmentId, body));
     }
 
     if (url.pathname.startsWith("/api/equipment/") && request.method === "DELETE") {
       const equipmentId = getIdFromPath(url.pathname);
-      await deleteEquipment(session.userId, equipmentId);
+      await deleteEquipment(sessionUser.id, equipmentId);
       return sendJson(response, 200, { ok: true });
     }
 
     if (url.pathname === "/api/demo/seed" && request.method === "POST") {
-      return sendJson(response, 200, await seedDemoData(session.userId));
+      return sendJson(response, 200, await seedDemoData(sessionUser.id));
     }
 
     if (request.method === "GET") {
@@ -255,10 +335,30 @@ async function handleRegister(response, body) {
   const data = await readData();
   const existing = data.users.find((user) => user.email === email);
   if (existing) {
-    throw createHttpError(409, "Korisnik s tim emailom vec postoji.");
+    if (!isPlaceholderUser(existing)) {
+      throw createHttpError(409, "Korisnik s tim emailom vec postoji.");
+    }
+
+    const completedUser = await completePlaceholderRegistration(existing.id, {
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      primaryBand,
+      primaryInstrument,
+    });
+    const registrationEmailResult = await sendRegistrationWelcomeEmail(completedUser);
+    const sessionId = await createSession(existing.id);
+    response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(response.req)));
+    return sendJson(response, 201, {
+      user: serializeUser(completedUser),
+      registrationEmailSent: registrationEmailResult.sent,
+      registrationEmailError: registrationEmailResult.error,
+    });
   }
 
-  const userId = await createUser({
+  const userId = await createRegisteredUser({
     email,
     password,
     firstName,
@@ -267,12 +367,60 @@ async function handleRegister(response, body) {
     primaryBand,
     primaryInstrument,
   });
-  const user = await getUserById(userId);
-  const registrationEmailResult = await sendRegistrationWelcomeEmail(user);
+  const createdUser = await getUserById(userId);
+  const registrationEmailResult = await sendRegistrationWelcomeEmail(createdUser);
   const sessionId = await createSession(userId);
   response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(response.req)));
   return sendJson(response, 201, {
-    user: serializeUser(user),
+    user: serializeUser(createdUser),
+    registrationEmailSent: registrationEmailResult.sent,
+    registrationEmailError: registrationEmailResult.error,
+  });
+}
+
+async function handleCompleteRegistrationCheckout(request, response, body) {
+  const checkoutSessionId = asString(body.checkoutSessionId);
+  if (!checkoutSessionId) {
+    throw createHttpError(400, "Checkout session nije dostupan.");
+  }
+
+  const stripe = getStripeClient();
+  if (!stripe) {
+    throw createHttpError(503, "Stripe nije konfiguriran.");
+  }
+
+  const session = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+  if (!session || session.mode !== "payment" || session.payment_status !== "paid") {
+    throw createHttpError(400, "Uplata za checkout session jos nije potvrdena.");
+  }
+
+  const userId = asString(session.metadata?.userId || session.client_reference_id);
+  const email = normalizeEmail(session.metadata?.email);
+  const pendingRegistration = await consumePendingRegistration(userId, email);
+  if (!pendingRegistration) {
+    const existingUser = await findUserByEmail(email);
+    if (!existingUser || isPlaceholderUser(existingUser)) {
+      throw createHttpError(400, "Registracija za ovu uplatu nije pronadena.");
+    }
+
+    const sessionId = await createSession(existingUser.id);
+    response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(request)));
+    return sendJson(response, 200, { user: serializeUser(existingUser) });
+  }
+
+  const existingUser = await getUserById(pendingRegistration.userId);
+  if (!existingUser) {
+    throw createHttpError(404, "Korisnik za ovu uplatu nije pronaden.");
+  }
+
+  const completedUser = isPlaceholderUser(existingUser)
+    ? await completePlaceholderRegistration(existingUser.id, pendingRegistration)
+    : existingUser;
+  const registrationEmailResult = await sendRegistrationWelcomeEmail(completedUser);
+  const sessionId = await createSession(completedUser.id);
+  response.setHeader("Set-Cookie", buildSessionCookie(sessionId, isSecureRequest(request)));
+  return sendJson(response, 200, {
+    user: serializeUser(completedUser),
     registrationEmailSent: registrationEmailResult.sent,
     registrationEmailError: registrationEmailResult.error,
   });
@@ -284,8 +432,12 @@ async function handleLogin(response, body) {
   const data = await readData();
   const user = data.users.find((item) => item.email === email);
 
-  if (!user || !verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-    throw createHttpError(401, "Neispravan email ili lozinka.");
+  if (!user || isPlaceholderUser(user)) {
+    throw createHttpError(401, "Mail adresa ne postoji. Nastavite na registraciju.");
+  }
+
+  if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
+    throw createHttpError(401, "Unesena je kriva lozinka");
   }
 
   const sessionId = await createSession(user.id);
@@ -388,38 +540,46 @@ async function handleProfilePasswordChange(response, userId, body) {
   });
 }
 
-async function createUser(payload) {
-  const id = crypto.randomUUID();
-  const { salt, hash } = hashPassword(payload.password);
-  const createdAt = nowIso();
+async function clearAllGigs(userId, body) {
+  const password = typeof body.password === "string" ? body.password : "";
+  if (!password) {
+    throw createHttpError(400, "Lozinka je obavezna za brisanje svih događaja.");
+  }
 
-  await updateData((data) => {
-    data.users.push({
-      id,
-      email: payload.email,
-      firstName: asString(payload.firstName),
-      lastName: asString(payload.lastName),
-      address: asString(payload.address),
-      phone: asString(payload.phone),
-      primaryBand: asString(payload.primaryBand),
-      primaryInstrument: asString(payload.primaryInstrument),
-      passwordHash: hash,
-      passwordSalt: salt,
-      createdAt,
-    });
+  const data = await readData();
+  const user = data.users.find((item) => item.id === userId);
 
-    data.settings.push({
-      userId: id,
-      googleCalendarId: "primary",
-    });
+  if (!user || !verifyPassword(password, user.passwordSalt, user.passwordHash)) {
+    throw createHttpError(401, "Lozinka nije ispravna.");
+  }
+
+  await updateData((next) => {
+    next.gigs = (next.gigs || []).filter((gig) => gig.userId !== userId);
   });
 
-  return id;
+  return {
+    ok: true,
+    message: "Svi događaji su obrisani.",
+  };
+}
+
+async function createUser(payload) {
+  return createRegisteredUser(payload);
 }
 
 async function getUserById(userId) {
   const data = await readData();
   return data.users.find((user) => user.id === userId) || null;
+}
+
+async function findUserByEmail(email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const data = await readData();
+  return data.users.find((user) => user.email === normalizedEmail) || null;
 }
 
 async function createSession(userId) {
@@ -487,6 +647,103 @@ async function sendRegistrationWelcomeEmail(user) {
     logMailDeliveryError("Slanje registracijskog emaila nije uspjelo", user.email, error);
     return { sent: false, error: formatMailError(error) };
   }
+}
+
+async function createPlaceholderBillingUser(email) {
+  const id = crypto.randomUUID();
+  const createdAt = nowIso();
+
+  await updateData((data) => {
+    data.users.push({
+      id,
+      email,
+      firstName: "",
+      lastName: "",
+      address: "",
+      phone: "",
+      primaryBand: "",
+      primaryInstrument: "",
+      passwordHash: "",
+      passwordSalt: "",
+      createdAt,
+      trialStartedAt: createdAt,
+      trialEndsAt: "",
+      subscriptionStatus: "inactive",
+      subscriptionPaidAt: "",
+      licenseStatus: "inactive",
+      licensePaidAt: "",
+      licenseExpiresAt: "",
+      stripeCustomerId: "",
+      stripeSubscriptionId: "",
+    });
+
+    data.settings.push({
+      userId: id,
+      googleCalendarId: "primary",
+    });
+  });
+
+  return getUserById(id);
+}
+
+async function createRegisteredUser(payload) {
+  const id = crypto.randomUUID();
+  const { salt, hash } = hashPassword(payload.password);
+  const createdAt = nowIso();
+
+  await updateData((data) => {
+    data.users.push({
+      id,
+      email: payload.email,
+      firstName: asString(payload.firstName),
+      lastName: asString(payload.lastName),
+      address: asString(payload.address),
+      phone: asString(payload.phone),
+      primaryBand: asString(payload.primaryBand),
+      primaryInstrument: asString(payload.primaryInstrument),
+      passwordHash: hash,
+      passwordSalt: salt,
+      createdAt,
+      trialStartedAt: createdAt,
+      trialEndsAt: "",
+      subscriptionStatus: "inactive",
+      subscriptionPaidAt: "",
+      licenseStatus: "inactive",
+      licensePaidAt: "",
+      licenseExpiresAt: "",
+      stripeCustomerId: "",
+      stripeSubscriptionId: "",
+    });
+
+    data.settings.push({
+      userId: id,
+      googleCalendarId: "primary",
+    });
+  });
+
+  return id;
+}
+
+async function completePlaceholderRegistration(userId, payload) {
+  const { salt, hash } = hashPassword(payload.password);
+
+  await updateData((data) => {
+    const user = data.users.find((item) => item.id === userId);
+    if (!user) {
+      throw createHttpError(404, "Korisnik nije pronaden.");
+    }
+
+    user.email = payload.email;
+    user.firstName = asString(payload.firstName);
+    user.lastName = asString(payload.lastName);
+    user.phone = asString(payload.phone);
+    user.primaryBand = asString(payload.primaryBand);
+    user.primaryInstrument = asString(payload.primaryInstrument);
+    user.passwordSalt = salt;
+    user.passwordHash = hash;
+  });
+
+  return getUserById(userId);
 }
 
 async function sendPasswordResetEmail(user, token) {
@@ -711,6 +968,16 @@ async function clearSession(sessionId) {
 
   await updateData((data) => {
     data.sessions = data.sessions.filter((item) => item.id !== sessionId);
+  });
+}
+
+async function clearUserSessions(userId) {
+  if (!userId) {
+    return;
+  }
+
+  await updateData((data) => {
+    data.sessions = data.sessions.filter((item) => item.userId !== userId);
   });
 }
 
@@ -1285,7 +1552,320 @@ function serializeUser(user) {
     primaryBand: user.primaryBand || "",
     primaryInstrument: user.primaryInstrument || "",
     createdAt: user.createdAt,
+    billing: buildBillingState(user),
   } : null;
+}
+
+function buildBillingState(user) {
+  const stripeEnabled = Boolean(getStripeClient() && STRIPE_PRICE_ID);
+  const subscriptionStatus = user?.subscriptionStatus || "inactive";
+  const subscriptionActive = isSubscriptionStatusActive(subscriptionStatus);
+  const licenseStatus = getResolvedLicenseStatus(user);
+  const licenseExpiresAt = user?.licenseExpiresAt || "";
+  const licensePaidAt = user?.licensePaidAt || "";
+  const licenseActive = hasUserAccess(user);
+  const accessActive = licenseActive;
+
+  return {
+    accessActive,
+    trialActive: false,
+    trialDays: 0,
+    trialEndsAt: "",
+    trialDaysLeft: 0,
+    licenseActive,
+    licenseStatus,
+    licensePaidAt,
+    licenseExpiresAt,
+    subscriptionActive,
+    subscriptionStatus,
+    subscriptionPaidAt: user?.subscriptionPaidAt || "",
+    stripeEnabled,
+    stripeConfigured: stripeEnabled,
+    stripeCustomerId: user?.stripeCustomerId || "",
+    priceLabel: BILLING_PRICE_LABEL,
+    currency: BILLING_CURRENCY.toUpperCase(),
+    licenseDurationDays: LICENSE_DURATION_DAYS,
+    requiresPayment: !accessActive,
+  };
+}
+
+function isTrialActive(user) {
+  if (!user?.trialEndsAt) {
+    return false;
+  }
+
+  return new Date(user.trialEndsAt).getTime() >= Date.now();
+}
+
+function isSubscriptionStatusActive(status) {
+  return String(status || "").toLowerCase() === "active";
+}
+
+function isLicenseActive(user) {
+  if (!user?.licenseExpiresAt) {
+    return false;
+  }
+
+  return new Date(user.licenseExpiresAt).getTime() >= Date.now();
+}
+
+function hasUserAccess(user) {
+  return isLicenseActive(user) || isSubscriptionStatusActive(user?.subscriptionStatus);
+}
+
+function getResolvedLicenseStatus(user) {
+  if (hasUserAccess(user)) {
+    return "active";
+  }
+
+  if (user?.licenseExpiresAt) {
+    const expiresAt = new Date(user.licenseExpiresAt).getTime();
+    if (Number.isFinite(expiresAt) && expiresAt < Date.now()) {
+      return "expired";
+    }
+  }
+
+  return asString(user?.licenseStatus) || "inactive";
+}
+
+function isPlaceholderUser(user) {
+  return !asString(user?.passwordHash) || !asString(user?.passwordSalt);
+}
+
+function getStripeClient() {
+  if (!STRIPE_SECRET_KEY || !Stripe) {
+    return null;
+  }
+
+  if (!stripeClient) {
+    stripeClient = new Stripe(STRIPE_SECRET_KEY);
+  }
+
+  return stripeClient;
+}
+
+async function handleCreateCheckoutSession(request, response, user) {
+  const stripe = getStripeClient();
+  if (!stripe || !STRIPE_PRICE_ID) {
+    throw createHttpError(503, "Stripe naplata jos nije konfigurirana na serveru.");
+  }
+
+  const origin = getRequestOrigin(request);
+  const successUrl = `${origin}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${origin}/?checkout=cancelled`;
+  const customerId = await ensureStripeCustomer(stripe, user);
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    customer: customerId,
+    client_reference_id: user.id,
+    line_items: [
+      {
+        price: STRIPE_PRICE_ID,
+        quantity: 1,
+      },
+    ],
+    allow_promotion_codes: true,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    metadata: {
+      userId: user.id,
+      email: user.email,
+      purchaseType: "annual_license",
+    },
+  });
+
+  return sendJson(response, 200, { url: session.url });
+}
+
+async function handlePublicCheckoutSession(request, response, body) {
+  const email = normalizeEmail(body.email);
+  if (!email) {
+    throw createHttpError(400, "Upisi email adresu kako bismo vezali licencu uz tvoj racun.");
+  }
+
+  const data = await readData();
+  let user = data.users.find((entry) => entry.email === email) || null;
+  if (!user) {
+    user = await createPlaceholderBillingUser(email);
+  }
+
+  const password = typeof body.password === "string" ? body.password : "";
+  const firstName = asString(body.firstName);
+  const lastName = asString(body.lastName);
+  const phone = asString(body.phone);
+  const primaryBand = asString(body.primaryBand);
+  const primaryInstrument = asString(body.primaryInstrument);
+
+  if (password || firstName || lastName || phone || primaryBand || primaryInstrument) {
+    if (!password || !firstName || !lastName || !phone) {
+      throw createHttpError(400, "Za registraciju su obavezni email, ime, prezime, broj mobitela i lozinka.");
+    }
+
+    if (!isPasswordStrongEnough(password)) {
+      throw createHttpError(400, "Lozinka mora imati najmanje 8 znakova i barem jedan broj.");
+    }
+
+    await savePendingRegistration(user.id, {
+      userId: user.id,
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      primaryBand,
+      primaryInstrument,
+      createdAt: nowIso(),
+    });
+  }
+
+  return handleCreateCheckoutSession(request, response, user);
+}
+
+async function ensureStripeCustomer(stripe, user) {
+  if (user?.stripeCustomerId) {
+    return user.stripeCustomerId;
+  }
+
+  const customer = await stripe.customers.create({
+    email: user.email,
+    name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || undefined,
+    phone: user.phone || undefined,
+    metadata: {
+      userId: user.id,
+    },
+  });
+
+  await updateData((data) => {
+    const target = data.users.find((entry) => entry.id === user.id);
+    if (target) {
+      target.stripeCustomerId = customer.id;
+    }
+  });
+
+  return customer.id;
+}
+
+async function handleStripeWebhook(request, response, rawBody) {
+  const stripe = getStripeClient();
+  if (!stripe) {
+    throw createHttpError(503, "Stripe nije konfiguriran.");
+  }
+
+  const signature = request.headers["stripe-signature"];
+  if (!signature || !STRIPE_WEBHOOK_SECRET) {
+    throw createHttpError(400, "Stripe webhook secret nije konfiguriran.");
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, signature, STRIPE_WEBHOOK_SECRET);
+  } catch (error) {
+    throw createHttpError(400, `Stripe webhook nije valjan: ${error.message}`);
+  }
+
+  switch (event.type) {
+    case "checkout.session.completed":
+      await handleCheckoutSessionCompleted(event.data.object);
+      break;
+    default:
+      break;
+  }
+
+  response.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    ...getSecurityHeaders(),
+  });
+  response.end(JSON.stringify({ received: true }));
+}
+
+async function handleCheckoutSessionCompleted(session) {
+  if (session.mode !== "payment") {
+    return;
+  }
+
+  const userId = session.metadata?.userId || session.client_reference_id || "";
+  const paidAt = nowIso();
+  await updateStripeBillingForUser(userId, {
+    stripeCustomerId: asString(session.customer),
+    licenseStatus: "active",
+    licensePaidAt: paidAt,
+    licenseExpiresAt: addDaysFrom(LICENSE_DURATION_DAYS, paidAt),
+  });
+
+}
+
+async function handleRestorePurchases(user) {
+  return {
+    restored: false,
+    billing: buildBillingState(user),
+    message: "Obnova kupnje je trenutno placeholder. TODO: povezati billing provider restore/sync tok.",
+  };
+}
+
+async function updateStripeBillingForUser(userId, changes) {
+  if (!userId) {
+    return;
+  }
+
+  await updateData((data) => {
+    const user = data.users.find((entry) => entry.id === userId);
+    if (!user) {
+      return;
+    }
+
+    if (changes.stripeCustomerId !== undefined) {
+      user.stripeCustomerId = asString(changes.stripeCustomerId);
+    }
+    if (changes.stripeSubscriptionId !== undefined) {
+      user.stripeSubscriptionId = asString(changes.stripeSubscriptionId);
+    }
+    if (changes.subscriptionStatus !== undefined) {
+      user.subscriptionStatus = asString(changes.subscriptionStatus) || "inactive";
+    }
+    if (changes.subscriptionPaidAt !== undefined) {
+      user.subscriptionPaidAt = asString(changes.subscriptionPaidAt);
+    }
+    if (changes.licenseStatus !== undefined) {
+      user.licenseStatus = asString(changes.licenseStatus) || "inactive";
+    }
+    if (changes.licensePaidAt !== undefined) {
+      user.licensePaidAt = asString(changes.licensePaidAt);
+    }
+    if (changes.licenseExpiresAt !== undefined) {
+      user.licenseExpiresAt = asString(changes.licenseExpiresAt);
+    }
+  });
+}
+
+async function savePendingRegistration(userId, payload) {
+  await updateData((data) => {
+    const pendingRegistrations = Array.isArray(data.pendingRegistrations) ? data.pendingRegistrations : [];
+    data.pendingRegistrations = pendingRegistrations.filter((item) => item.userId !== userId && item.email !== payload.email);
+    data.pendingRegistrations.push({
+      userId,
+      email: payload.email,
+      password: payload.password,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      phone: payload.phone,
+      primaryBand: payload.primaryBand,
+      primaryInstrument: payload.primaryInstrument,
+      createdAt: payload.createdAt || nowIso(),
+    });
+  });
+}
+
+async function consumePendingRegistration(userId, email) {
+  let found = null;
+
+  await updateData((data) => {
+    const pendingRegistrations = Array.isArray(data.pendingRegistrations) ? data.pendingRegistrations : [];
+    const match = pendingRegistrations.find((item) => item.userId === userId || item.email === email) || null;
+    found = match ? { ...match } : null;
+    data.pendingRegistrations = pendingRegistrations.filter((item) => item !== match);
+  });
+
+  return found;
 }
 
 function isPasswordStrongEnough(password) {
@@ -1311,6 +1891,13 @@ function buildExpiredSessionCookie(secure = false) {
   return `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`;
 }
 
+function buildExpiredSessionCookies() {
+  return [
+    buildExpiredSessionCookie(false),
+    buildExpiredSessionCookie(true),
+  ];
+}
+
 function hashResetToken(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
 }
@@ -1322,6 +1909,10 @@ function hashPassword(password) {
 }
 
 function verifyPassword(password, salt, expectedHash) {
+  if (!salt || !expectedHash) {
+    return false;
+  }
+
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(expectedHash, "hex"));
 }
@@ -1356,6 +1947,12 @@ function nowIso() {
 
 function addDays(days) {
   const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+function addDaysFrom(days, fromValue) {
+  const date = fromValue ? new Date(fromValue) : new Date();
   date.setDate(date.getDate() + days);
   return date.toISOString();
 }
@@ -1403,6 +2000,19 @@ function readJsonBody(request) {
       }
     });
 
+    request.on("error", reject);
+  });
+}
+
+function readRawBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+
+    request.on("end", () => resolve(body));
     request.on("error", reject);
   });
 }
@@ -1485,6 +2095,14 @@ function loadEnvFile() {
   }
 }
 
+function getRequestOrigin(request) {
+  const forwardedProto = typeof request.headers["x-forwarded-proto"] === "string"
+    ? request.headers["x-forwarded-proto"].split(",")[0].trim()
+    : "";
+  const protocol = forwardedProto || (request.socket?.encrypted ? "https" : "http");
+  return APP_URL || `${protocol}://${request.headers.host}`;
+}
+
 function ensureDataFile() {
   if (fs.existsSync(DATA_FILE)) {
     return;
@@ -1498,6 +2116,7 @@ function createEmptyData() {
     users: [],
     sessions: [],
     passwordResets: [],
+    pendingRegistrations: [],
     settings: [],
     bandDirectory: [],
     bands: [],
@@ -1510,14 +2129,37 @@ async function readData() {
   const raw = await fs.promises.readFile(DATA_FILE, "utf8");
   const data = JSON.parse(raw);
   return {
-    users: Array.isArray(data.users) ? data.users : [],
+    users: Array.isArray(data.users) ? data.users.map(normalizeStoredUser) : [],
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
     passwordResets: Array.isArray(data.passwordResets) ? data.passwordResets : [],
+    pendingRegistrations: Array.isArray(data.pendingRegistrations) ? data.pendingRegistrations : [],
     settings: Array.isArray(data.settings) ? data.settings : [],
     bandDirectory: Array.isArray(data.bandDirectory) ? data.bandDirectory : [],
     bands: Array.isArray(data.bands) ? data.bands : [],
     gigs: Array.isArray(data.gigs) ? data.gigs : [],
     equipment: Array.isArray(data.equipment) ? data.equipment : [],
+  };
+}
+
+function normalizeStoredUser(user) {
+  const createdAt = user?.createdAt || nowIso();
+  const trialStartedAt = user?.trialStartedAt || createdAt;
+  const trialEndsAt = user?.trialEndsAt || "";
+  const licenseExpiresAt = user?.licenseExpiresAt || "";
+  const subscriptionStatus = isSubscriptionStatusActive(user?.subscriptionStatus) ? "active" : "inactive";
+
+  return {
+    ...user,
+    createdAt,
+    trialStartedAt,
+    trialEndsAt,
+    subscriptionStatus,
+    subscriptionPaidAt: user?.subscriptionPaidAt || "",
+    licenseStatus: user?.licenseStatus || (licenseExpiresAt && new Date(licenseExpiresAt).getTime() >= Date.now() ? "active" : subscriptionStatus === "active" ? "active" : "inactive"),
+    licensePaidAt: user?.licensePaidAt || user?.subscriptionPaidAt || "",
+    licenseExpiresAt,
+    stripeCustomerId: user?.stripeCustomerId || "",
+    stripeSubscriptionId: user?.stripeSubscriptionId || "",
   };
 }
 

@@ -1,13 +1,14 @@
-const CACHE_NAME = "gazza-manager-v1";
+const CACHE_NAME = "gazza-manager-v4";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
   "/manifest.webmanifest",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/logo.jpg",
+  "/logo.png",
+  "/logo_trans.png",
+  "/ikona_bijela_transparent.png",
+  "/ikona_plava_transparent.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -35,6 +36,23 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (requestUrl.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  const isAppShellAsset = ["/", "/index.html", "/style.css", "/app.js"].includes(requestUrl.pathname);
+
+  if (isAppShellAsset) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === "basic") {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request)),
+    );
     return;
   }
 

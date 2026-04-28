@@ -1,5 +1,6 @@
 const initialState = {
   user: null,
+  billing: null,
   settings: {
     clientId: "",
     calendarId: "primary",
@@ -34,13 +35,51 @@ let authMode = "login";
 let authResetToken = "";
 let activeGigDiaryId = null;
 let gigSearchQuery = "";
+let gigDiaryDateFilter = "";
+let financeFilterYear = "";
+let financeFilterMonth = "";
 const GOOGLE_OAUTH_STORAGE_KEY = "glazbeni_dnevnik_google_oauth";
+const licenseApi = window.licenseService || {
+  normalizeBilling(billing) {
+    return billing && typeof billing === "object" ? billing : null;
+  },
+  hasActiveLicense(billing) {
+    return Boolean(billing?.licenseActive || billing?.accessActive);
+  },
+  getLicenseState(billing) {
+    if (!billing) {
+      return "unknown";
+    }
+    return billing.licenseExpiresAt ? "expired" : "inactive";
+  },
+  fetchStatus(apiClient) {
+    return apiClient("/api/billing/status");
+  },
+  restorePurchases(apiClient) {
+    return apiClient("/api/billing/restore", { method: "POST" });
+  },
+};
+const licenseUiState = {
+  loading: false,
+  error: "",
+  message: "",
+};
+const PURCHASE_SUCCESS_REDIRECT_MS = 2600;
+const APP_LAUNCH_MIN_MS = 850;
+let checkoutSessionIdFromLocation = "";
+let checkoutSuccessFromLocation = false;
+let purchaseRedirectTimeoutId = null;
 
 const elements = {
   authShell: document.getElementById("authShell"),
+  authPanel: document.getElementById("authForm")?.closest(".auth-panel"),
   appShell: document.getElementById("appShell"),
+  appLaunchScreen: document.getElementById("appLaunchScreen"),
+  appLaunchStatus: document.getElementById("appLaunchStatus"),
   authForm: document.getElementById("authForm"),
+  authEyebrow: document.getElementById("authEyebrow"),
   authTitle: document.getElementById("authTitle"),
+  authIntroCopy: document.getElementById("authIntroCopy"),
   authEmail: document.getElementById("authEmail"),
   authFirstName: document.getElementById("authFirstName"),
   authLastName: document.getElementById("authLastName"),
@@ -56,7 +95,22 @@ const elements = {
   authPasswordField: document.getElementById("authPasswordField"),
   authPasswordConfirmField: document.getElementById("authPasswordConfirmField"),
   authStatus: document.getElementById("authStatus"),
-  authRegisterFields: [...document.querySelectorAll(".auth-register-field")],
+  authBillingPanel: document.getElementById("authBillingPanel"),
+  authBillingTitle: document.getElementById("authBillingTitle"),
+  authBillingMessage: document.getElementById("authBillingMessage"),
+  authStartCheckoutButton: document.getElementById("authStartCheckoutButton"),
+  paywallPanel: document.getElementById("paywallPanel"),
+  paywallTitle: document.getElementById("paywallTitle"),
+  paywallMessage: document.getElementById("paywallMessage"),
+  paywallStatus: document.getElementById("paywallStatus"),
+  paywallFooter: document.getElementById("paywallFooter"),
+  paywallCheckoutButton: document.getElementById("paywallCheckoutButton"),
+  paywallLogoutButton: document.getElementById("paywallLogoutButton"),
+  authRegisterFields: [
+    document.getElementById("authFirstNameField"),
+    document.getElementById("authLastNameField"),
+    document.getElementById("authPhoneField"),
+  ].filter(Boolean),
   forgotPasswordButton: document.getElementById("forgotPasswordButton"),
   authBackToLoginButton: document.getElementById("authBackToLoginButton"),
   currentUserName: document.getElementById("currentUserName"),
@@ -65,10 +119,25 @@ const elements = {
   profileUserEmail: document.getElementById("profileUserEmail"),
   profileForm: document.getElementById("profileForm"),
   profileStatus: document.getElementById("profileStatus"),
+  profileBillingPanel: document.getElementById("profileBillingPanel"),
+  profileBillingTitle: document.getElementById("profileBillingTitle"),
+  profileBillingMessage: document.getElementById("profileBillingMessage"),
+  profileBillingStatus: document.getElementById("profileBillingStatus"),
+  profileBillingEndsAt: document.getElementById("profileBillingEndsAt"),
+  profileBillingPrice: document.getElementById("profileBillingPrice"),
+  profileBillingStripeStatus: document.getElementById("profileBillingStripeStatus"),
+  profileStartCheckoutButton: document.getElementById("profileStartCheckoutButton"),
   profilePasswordForm: document.getElementById("profilePasswordForm"),
   changePasswordToggleButton: document.getElementById("changePasswordToggleButton"),
   cancelPasswordChangeButton: document.getElementById("cancelPasswordChangeButton"),
   deleteAccountButton: document.getElementById("deleteAccountButton"),
+  profileBackupPdfButton: document.getElementById("profileBackupPdfButton"),
+  profileGoogleReconnectButton: document.getElementById("profileGoogleReconnectButton"),
+  profileGoogleImportButton: document.getElementById("profileGoogleImportButton"),
+  showClearGigsFormButton: document.getElementById("showClearGigsFormButton"),
+  clearGigsForm: document.getElementById("clearGigsForm"),
+  clearGigsPasswordInput: document.getElementById("clearGigsPasswordInput"),
+  cancelClearGigsButton: document.getElementById("cancelClearGigsButton"),
   profileFirstName: document.getElementById("profileFirstName"),
   profileLastName: document.getElementById("profileLastName"),
   profileAddress: document.getElementById("profileAddress"),
@@ -90,9 +159,11 @@ const elements = {
   quickMenuPanel: document.getElementById("quickMenuPanel"),
   gigDiaryModal: document.getElementById("gigDiaryModal"),
   gigDiaryCloseButton: document.getElementById("gigDiaryCloseButton"),
+  gigDiaryTitle: document.getElementById("gigDiaryTitle"),
   gigDiaryList: document.getElementById("gigDiaryList"),
   gigDiaryDetail: document.getElementById("gigDiaryDetail"),
   gigSearchInput: document.getElementById("gigSearchInput"),
+  gigDiarySearchRow: document.querySelector("#gigDiaryModal .diary-search-row"),
   homeGigSearchInput: document.getElementById("homeGigSearchInput"),
   homeGigSearchResults: document.getElementById("homeGigSearchResults"),
   logoutButton: document.getElementById("logoutButton"),
@@ -123,13 +194,15 @@ const elements = {
   calendarLabel: document.getElementById("calendarLabel"),
   prevMonth: document.getElementById("prevMonth"),
   nextMonth: document.getElementById("nextMonth"),
-  monthlyBreakdown: document.getElementById("monthlyBreakdown"),
-  bandBreakdown: document.getElementById("bandBreakdown"),
+  financeYearFilter: document.getElementById("financeYearFilter"),
+  financeMonthFilter: document.getElementById("financeMonthFilter"),
+  financePeriodResults: document.getElementById("financePeriodResults"),
   googleCalendarSelect: document.getElementById("googleCalendarSelect"),
   googleCalendarStatus: document.getElementById("googleCalendarStatus"),
   googleConnectButton: document.getElementById("googleConnectButton"),
   googleDisconnectButton: document.getElementById("googleDisconnectButton"),
   googleImportButton: document.getElementById("googleImportButton"),
+  googleCalendarPanel: document.querySelector(".google-calendar-panel"),
 };
 
 const calendarState = createInitialCalendarState();
@@ -137,36 +210,96 @@ const googleCalendarRuntime = {
   accessToken: null,
   ready: true,
 };
+const appLaunchState = {
+  startedAt: typeof performance !== "undefined" ? performance.now() : Date.now(),
+  hidden: false,
+};
 
 boot();
 
 async function boot() {
-  registerServiceWorker();
-  bindEvents();
-  setDefaultDates();
-  syncGigNetEarningAvailability();
-  syncAdvanceReceiptAvailability();
-  syncAuthModeFromLocation();
-  renderAuthMode();
+  try {
+    setLaunchStatus("Pokretanje aplikacije...");
+    registerServiceWorker();
+    bindEvents();
+    setDefaultDates();
+    syncGigNetEarningAvailability();
+    syncAdvanceReceiptAvailability();
+    syncAuthModeFromLocation();
+    syncCheckoutStateFromLocation();
+    renderAuthMode();
 
-  const sessionResponse = await api("/api/auth/me");
-  if (sessionResponse.user) {
-    await loadBootstrap();
-    await finalizeGoogleRedirectSession();
-  } else {
+    setLaunchStatus("Provjera korisnickog racuna...");
+    const sessionResponse = await api("/api/auth/me");
+    if (sessionResponse.user) {
+      state.user = sessionResponse.user;
+      state.billing = sessionResponse.user.billing || null;
+      setLaunchStatus("Ucitavanje tvojih podataka...");
+      const canEnterApp = await guardAppEntry({
+        loadProtectedData: true,
+        delayAfterSuccessfulPurchase: checkoutSuccessFromLocation,
+      });
+      if (canEnterApp) {
+        setLaunchStatus("Sinkronizacija aplikacije...");
+        await finalizeGoogleRedirectSession();
+      }
+    } else {
+      if (checkoutSessionIdFromLocation) {
+        setLaunchStatus("Dovrsavanje registracije...");
+        await completePendingRegistrationAfterCheckout();
+        return;
+      }
+      renderAuthOnly();
+    }
+  } catch (error) {
     renderAuthOnly();
+    if (elements.authStatus) {
+      elements.authStatus.textContent = error?.message || "Aplikacija se nije uspjela pokrenuti. Pokusaj ponovno.";
+    }
+  } finally {
+    await hideLaunchScreen();
   }
+}
+
+function setLaunchStatus(message) {
+  if (elements.appLaunchStatus) {
+    elements.appLaunchStatus.textContent = message;
+  }
+}
+
+async function hideLaunchScreen() {
+  if (appLaunchState.hidden || !elements.appLaunchScreen) {
+    return;
+  }
+
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const elapsed = now - appLaunchState.startedAt;
+  const remaining = Math.max(0, APP_LAUNCH_MIN_MS - elapsed);
+  if (remaining > 0) {
+    await new Promise((resolve) => window.setTimeout(resolve, remaining));
+  }
+
+  elements.appLaunchScreen.classList.add("is-hidden");
+  appLaunchState.hidden = true;
+  window.setTimeout(() => {
+    elements.appLaunchScreen?.remove();
+  }, 360);
 }
 
 function bindEvents() {
   elements.authForm.addEventListener("submit", handleAuthSubmit);
   elements.authToggleMode.addEventListener("click", toggleAuthMode);
+  elements.authStartCheckoutButton?.addEventListener("click", handleBillingCheckout);
+  elements.paywallCheckoutButton?.addEventListener("click", handleBillingCheckout);
+  elements.paywallLogoutButton?.addEventListener("click", handleLogout);
   elements.forgotPasswordButton?.addEventListener("click", openForgotPasswordMode);
   elements.authBackToLoginButton?.addEventListener("click", () => setAuthMode("login"));
   elements.quickMenuToggle?.addEventListener("click", toggleQuickMenu);
   elements.gigDiaryCloseButton?.addEventListener("click", closeGigDiaryModal);
   elements.gigSearchInput?.addEventListener("input", handleGigSearchInput);
   elements.homeGigSearchInput?.addEventListener("input", handleGigSearchInput);
+  elements.financeYearFilter?.addEventListener("change", handleFinanceYearFilterChange);
+  elements.financeMonthFilter?.addEventListener("change", handleFinanceMonthFilterChange);
   elements.logoutButton.addEventListener("click", handleLogout);
   elements.seedDemoButton?.addEventListener("click", handleSeedDemo);
 
@@ -194,9 +327,16 @@ function bindEvents() {
   elements.googleDisconnectButton.addEventListener("click", handleGoogleDisconnect);
   elements.googleImportButton.addEventListener("click", handleGoogleImport);
   elements.profileForm?.addEventListener("submit", handleProfileSubmit);
+  elements.profileStartCheckoutButton?.addEventListener("click", handleBillingCheckout);
   elements.profilePasswordForm?.addEventListener("submit", handleProfilePasswordSubmit);
   elements.changePasswordToggleButton?.addEventListener("click", openProfilePasswordForm);
   elements.cancelPasswordChangeButton?.addEventListener("click", closeProfilePasswordForm);
+  elements.profileBackupPdfButton?.addEventListener("click", handleProfileBackupPdf);
+  elements.profileGoogleReconnectButton?.addEventListener("click", handleProfileGoogleReconnect);
+  elements.profileGoogleImportButton?.addEventListener("click", handleProfileGoogleImport);
+  elements.showClearGigsFormButton?.addEventListener("click", openClearGigsForm);
+  elements.cancelClearGigsButton?.addEventListener("click", closeClearGigsForm);
+  elements.clearGigsForm?.addEventListener("submit", handleClearGigsSubmit);
   elements.deleteAccountButton?.addEventListener("click", handleAccountDelete);
 
   elements.prevMonth.addEventListener("click", () => {
@@ -265,6 +405,11 @@ async function handleAuthSubmit(event) {
     }
 
     const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+    if (authMode === "register") {
+      await startRegistrationCheckout(payload);
+      return;
+    }
+
     const result = await api(endpoint, {
       method: "POST",
       body: payload,
@@ -277,8 +422,19 @@ async function handleAuthSubmit(event) {
       elements.authStatus.textContent = "Prijava uspjesna.";
     }
     elements.authPassword.value = "";
-    await loadBootstrap();
+    state.user = result.user;
+    state.billing = result.user?.billing || null;
+    licenseUiState.message = authMode === "register"
+      ? "Racun je spreman. Dovrsi kupnju licence za ulazak u aplikaciju."
+      : "";
+    await guardAppEntry({ loadProtectedData: true, forceStatusRefresh: true });
   } catch (error) {
+    if (error.statusCode === 402) {
+      state.billing = error.billing || state.billing;
+      licenseUiState.error = error.message;
+      renderPaywall();
+      return;
+    }
     elements.authStatus.textContent = error.message;
   }
 }
@@ -293,27 +449,40 @@ function renderAuthMode() {
   const isForgot = authMode === "forgot";
   const isReset = authMode === "reset";
 
+  if (elements.authEyebrow) {
+    elements.authEyebrow.textContent = isRegister ? "Registracija" : isForgot || isReset ? "Pristup" : "designed by CTRL WAVE";
+  }
+  if (elements.authIntroCopy) {
+    elements.authIntroCopy.textContent = isLogin
+      ? "Prijavi se i vodi evidenciju o svim svojim nastupima, financijama, prodaji i kupnji opreme..."
+      : isRegister
+        ? "Račun i licenca bit ce povezani s emailom koji upisujes u ovoj formi."
+        : isForgot
+          ? "Upisi email računa i poslat cemo ti poveznicu za postavljanje nove lozinke."
+          : "Postavi novu lozinku za isti korisnicki račun.";
+  }
+
   elements.authTitle.textContent = isLogin
-    ? "Prijavi se u glazbeni dnevnik"
+    ? "Prijavi se ili registriraj"
     : isRegister
-      ? "Kreiraj novi racun"
+      ? "Kreiraj racun i nastavi na placanje"
       : isForgot
         ? "Zaboravljena lozinka"
         : "Postavi novu lozinku";
   elements.authSubmitButton.textContent = isLogin
     ? "Prijava"
     : isRegister
-      ? "Registracija"
+      ? "Nastavi na placanje"
       : isForgot
         ? "Posalji link"
         : "Spremi lozinku";
-  elements.authToggleMode.textContent = isLogin ? "Nemam racun" : "Vec imam racun";
+  elements.authToggleMode.textContent = isLogin ? "Nemam račun" : "Vec imam račun";
   elements.authStatus.textContent = isLogin
-    ? "Prijavi se za nastavak."
+    ? "Ako već imate račun samo se logirajte. Za kreiranje novog računa kliknite Nemam račun i nastavite s registracijom."
     : isRegister
-      ? "Kreiraj racun za svoj dnevnik. Lozinka mora imati najmanje 8 znakova i barem jedan broj."
+      ? "Ispuni podatke jednom i nastavi na sigurnu aktivaciju licence za isti email. Lozinka mora imati najmanje 8 znakova i barem jedan broj."
       : isForgot
-        ? "Upisi email i poslat cemo ti link za novu lozinku."
+        ? "Upisi email i poslat cemo ti poveznicu za novu lozinku."
         : "Unesi novu lozinku. Lozinka mora imati najmanje 8 znakova i barem jedan broj.";
 
   elements.authEmailField?.classList.toggle("hidden", isReset);
@@ -340,6 +509,7 @@ function renderAuthMode() {
   if (isLogin || isForgot) {
     elements.authPasswordConfirm.value = "";
   }
+
 }
 
 function setAuthMode(nextMode) {
@@ -382,13 +552,58 @@ function isPasswordStrongEnough(password) {
   return typeof password === "string" && password.length >= 8 && /\d/.test(password);
 }
 
+async function startRegistrationCheckout(payload) {
+  licenseUiState.error = "";
+  licenseUiState.message = "Otvaramo sigurnu naplatu za registraciju i licencu...";
+  renderAuthOnly();
+  const result = await api("/api/public/billing/checkout-session", {
+    method: "POST",
+    body: payload,
+  });
+  if (!result?.url) {
+    throw new Error("Stripe checkout URL nije dostupan.");
+  }
+  window.location.assign(result.url);
+}
+
+async function completePendingRegistrationAfterCheckout() {
+  if (!checkoutSessionIdFromLocation) {
+    renderAuthOnly();
+    return;
+  }
+
+  try {
+    const result = await api("/api/auth/complete-registration-checkout", {
+      method: "POST",
+      body: { checkoutSessionId: checkoutSessionIdFromLocation },
+    });
+    state.user = result.user;
+    state.billing = result.user?.billing || null;
+    licenseUiState.message = "Kupnja je dovrsena i račun je aktiviran.";
+    checkoutSessionIdFromLocation = "";
+    await guardAppEntry({
+      loadProtectedData: true,
+      forceStatusRefresh: true,
+      delayAfterSuccessfulPurchase: true,
+    });
+  } catch (error) {
+    checkoutSessionIdFromLocation = "";
+    elements.authStatus.textContent = error.message;
+    renderAuthOnly();
+  }
+}
+
 async function handleLogout() {
   await api("/api/auth/logout", { method: "POST" });
+  clearPurchaseRedirectTimeout();
   state = structuredClone(initialState);
   googleCalendarRuntime.accessToken = null;
   googleCalendarRuntime.tokenClient = null;
   authMode = "login";
   authResetToken = "";
+  licenseUiState.loading = false;
+  licenseUiState.error = "";
+  licenseUiState.message = "";
   renderAuthOnly();
 }
 
@@ -405,12 +620,12 @@ async function handleSeedDemo() {
 async function loadBootstrap() {
   const data = await api("/api/bootstrap");
   applyBootstrapState(data);
-  renderApp();
 }
 
 function applyBootstrapState(data) {
   state = {
     user: data.user,
+    billing: data.user?.billing || state.billing,
     settings: data.settings || { clientId: "", calendarId: "primary" },
     bands: Array.isArray(data.bands) ? data.bands : [],
     bandDirectory: Array.isArray(data.bandDirectory) ? data.bandDirectory : [],
@@ -420,15 +635,27 @@ function applyBootstrapState(data) {
 }
 
 function renderAuthOnly() {
+  clearPurchaseRedirectTimeout();
   syncAuthModeFromLocation();
   renderAuthMode();
+  renderBillingState();
+  elements.authPanel?.classList.remove("hidden");
+  elements.paywallPanel?.classList.add("hidden");
   elements.authShell.classList.remove("hidden");
   elements.appShell.classList.add("hidden");
   closeQuickMenu();
   closeGigDiaryModal();
 }
 
+function renderBillingLocked() {
+  syncAuthModeFromLocation();
+  setAuthMode("login");
+  licenseUiState.message = "Licenca nije aktivna. Kupi ili obnovi licencu za nastavak rada.";
+  renderPaywall();
+}
+
 function renderApp() {
+  clearPurchaseRedirectTimeout();
   elements.authShell.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   closeQuickMenu();
@@ -461,6 +688,7 @@ function render() {
     elements.profilePrimaryBandInput.value = state.user?.primaryBand || "";
     elements.profilePrimaryInstrumentInput.value = state.user?.primaryInstrument || "";
   }
+  renderBillingState();
   closeProfilePasswordForm();
   renderGoogleCalendarControls();
   renderHeroStats();
@@ -469,10 +697,291 @@ function render() {
   renderGigDiary();
   renderCalendar();
   renderFinanceSummary();
-  renderMonthlyBreakdown();
-  renderBandBreakdown();
+  renderFinancePeriodFilters();
+  renderFinancePeriodResults();
   renderEquipmentSummary();
   renderEquipmentList();
+}
+
+function getBillingSnapshot() {
+  return licenseApi.normalizeBilling(state.billing || state.user?.billing) || {
+    accessActive: false,
+    licenseActive: false,
+    licenseStatus: "inactive",
+    licenseExpiresAt: "",
+    priceLabel: "25,00 EUR / 1 godina",
+    stripeEnabled: true,
+    requiresPayment: true,
+  };
+}
+
+function hasProtectedAppAccess() {
+  return licenseApi.hasActiveLicense(getBillingSnapshot());
+}
+
+async function refreshLicenseStatus({ showLoading = false } = {}) {
+  if (!state.user) {
+    return getBillingSnapshot();
+  }
+
+  if (showLoading) {
+    licenseUiState.loading = true;
+    licenseUiState.error = "";
+    renderPaywall();
+  }
+
+  try {
+    const billing = await licenseApi.fetchStatus(api);
+    state.billing = billing;
+    if (state.user) {
+      state.user.billing = billing;
+    }
+    licenseUiState.loading = false;
+    licenseUiState.error = "";
+    return billing;
+  } catch (error) {
+    if (error.billing) {
+      state.billing = error.billing;
+      if (state.user) {
+        state.user.billing = error.billing;
+      }
+    }
+    licenseUiState.loading = false;
+    licenseUiState.error = error.message;
+    throw error;
+  }
+}
+
+async function guardAppEntry({
+  loadProtectedData = true,
+  forceStatusRefresh = true,
+  delayAfterSuccessfulPurchase = false,
+} = {}) {
+  if (!state.user) {
+    renderAuthOnly();
+    return false;
+  }
+
+  try {
+    if (forceStatusRefresh) {
+      await refreshLicenseStatus({ showLoading: true });
+    }
+  } catch (_error) {
+    renderPaywall();
+    return false;
+  }
+
+  if (!hasProtectedAppAccess()) {
+    renderPaywall();
+    return false;
+  }
+
+  if (loadProtectedData) {
+    try {
+      await loadBootstrap();
+    } catch (error) {
+      if (error.statusCode === 402) {
+        state.billing = error.billing || state.billing;
+      }
+      licenseUiState.error = error.message;
+      renderPaywall();
+      return false;
+    }
+  }
+
+  if (delayAfterSuccessfulPurchase) {
+    await showPurchaseSuccessPause();
+  }
+
+  renderApp();
+  return true;
+}
+
+function syncCheckoutStateFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const checkout = params.get("checkout");
+  checkoutSessionIdFromLocation = params.get("session_id") || "";
+  checkoutSuccessFromLocation = checkout === "success";
+  if (checkout === "success") {
+    licenseUiState.message = "Uplata je zaprimljena. Provjeravamo licencu i pripremamo pristup aplikaciji.";
+  } else if (checkout === "cancelled") {
+    licenseUiState.message = "Kupnja je prekinuta prije dovrsetka. Sigurnu naplatu mozes otvoriti ponovno.";
+  }
+
+  if (!checkout) {
+    return;
+  }
+
+  params.delete("checkout");
+  const query = params.toString();
+  const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash || ""}`;
+  history.replaceState(null, "", nextUrl);
+}
+
+function clearPurchaseRedirectTimeout() {
+  if (purchaseRedirectTimeoutId !== null) {
+    window.clearTimeout(purchaseRedirectTimeoutId);
+    purchaseRedirectTimeoutId = null;
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    purchaseRedirectTimeoutId = window.setTimeout(() => {
+      purchaseRedirectTimeoutId = null;
+      resolve();
+    }, ms);
+  });
+}
+
+async function showPurchaseSuccessPause() {
+  clearPurchaseRedirectTimeout();
+  licenseUiState.loading = false;
+  licenseUiState.error = "";
+  licenseUiState.message = "Godisnja licenca je aktivna. Za trenutak ulazis u aplikaciju.";
+  renderPaywall();
+  await wait(PURCHASE_SUCCESS_REDIRECT_MS);
+  checkoutSuccessFromLocation = false;
+}
+
+function renderPaywall() {
+  renderBillingState();
+  elements.authPanel?.classList.add("hidden");
+  elements.paywallPanel?.classList.remove("hidden");
+  elements.authShell.classList.remove("hidden");
+  elements.appShell.classList.add("hidden");
+  closeQuickMenu();
+  closeGigDiaryModal();
+}
+
+function renderBillingState() {
+  const billing = getBillingSnapshot();
+  const licenseState = licenseApi.getLicenseState(billing);
+  const title = billing.licenseActive
+    ? "Godisnja licenca je aktivna"
+    : licenseState === "expired"
+      ? "Licenca je istekla"
+      : "Licenca nije aktivna";
+  const message = billing.licenseActive
+    ? `Tvoj račun ima aktivnu godisnju licencu${billing.licenseExpiresAt ? `, vrijedi do ${formatDateShort(billing.licenseExpiresAt)}.` : "."}`
+    : billing.stripeEnabled
+      ? `Pristup aplikaciji aktiviras kupnjom licence na 1 godinu za ${billing.priceLabel}. Naplata je vezana uz email s kojim si se prijavio ili registrirao.`
+      : "Online naplata trenutno nije dostupna jer Stripe jos nije konfiguriran na serveru.";
+  const statusLabel = billing.licenseActive
+    ? "Godisnja licenca"
+    : licenseState === "expired"
+      ? "Istekla licenca"
+      : "Ceka uplatu";
+  const paywallStatus = licenseUiState.loading
+    ? "Provjeravamo status licence..."
+    : licenseUiState.error
+      ? `Provjera licence nije uspjela: ${licenseUiState.error}`
+      : licenseUiState.message
+        ? licenseUiState.message
+        : billing.licenseActive
+          ? "Licenca je aktivna. Preusmjeravamo te u aplikaciju."
+          : licenseState === "expired"
+            ? "Prethodna licenca je istekla. Aktiviraj novu licencu za nastavak rada."
+            : "Aktivna licenca potrebna je za pristup aplikaciji.";
+
+  elements.authBillingPanel?.classList.remove("hidden");
+  if (elements.authBillingTitle) {
+    elements.authBillingTitle.textContent = "Jedan email, jedan racun i jedna licenca";
+  }
+  if (elements.authBillingMessage) {
+    elements.authBillingMessage.textContent = "Novi korisnici ispunjavaju podatke jednom i nastavljaju na placanje, a postojeci se prijavljuju i po potrebi aktiviraju licencu.";
+  }
+  if (elements.profileBillingTitle) {
+    elements.profileBillingTitle.textContent = title;
+  }
+  if (elements.profileBillingMessage) {
+    elements.profileBillingMessage.textContent = message;
+  }
+  if (elements.profileBillingStatus) {
+    elements.profileBillingStatus.textContent = statusLabel;
+  }
+  if (elements.profileBillingEndsAt) {
+    elements.profileBillingEndsAt.textContent = billing.licenseExpiresAt
+      ? formatDateShort(billing.licenseExpiresAt)
+      : "-";
+  }
+  if (elements.profileBillingPrice) {
+    elements.profileBillingPrice.textContent = billing.priceLabel || "-";
+  }
+  if (elements.profileBillingStripeStatus) {
+    elements.profileBillingStripeStatus.textContent = billing.stripeEnabled ? "Spreman" : "Nije konfiguriran";
+  }
+  if (elements.paywallTitle) {
+    elements.paywallTitle.textContent = title;
+  }
+  if (elements.paywallMessage) {
+    elements.paywallMessage.textContent = message;
+  }
+  if (elements.paywallStatus) {
+    elements.paywallStatus.textContent = paywallStatus;
+  }
+  if (elements.paywallFooter) {
+    elements.paywallFooter.textContent = billing.licenseExpiresAt
+      ? `Licenca je trenutno aktivna do ${formatDateShort(billing.licenseExpiresAt)}.`
+      : "Nakon uspjesne kupnje pristup aplikaciji otkljucava se automatski za isti email.";
+  }
+
+  const shouldShowCheckout = !billing.licenseActive;
+  const checkoutDisabled = !billing.stripeEnabled || licenseUiState.loading;
+  elements.authStartCheckoutButton?.classList.toggle("hidden", !shouldShowCheckout);
+  elements.profileStartCheckoutButton?.classList.toggle("hidden", !shouldShowCheckout);
+  elements.paywallCheckoutButton?.classList.toggle("hidden", !shouldShowCheckout);
+  elements.authStartCheckoutButton?.toggleAttribute("disabled", checkoutDisabled);
+  elements.profileStartCheckoutButton?.toggleAttribute("disabled", checkoutDisabled);
+  elements.paywallCheckoutButton?.toggleAttribute("disabled", checkoutDisabled);
+}
+
+async function handleBillingCheckout() {
+  try {
+    const email = elements.authEmail?.value.trim() || "";
+    if (!state.user && !email) {
+      showBillingStatus("Za nastavak prvo unesi mail adresu.");
+      return;
+    }
+
+    licenseUiState.error = "";
+    licenseUiState.message = "Otvaramo sigurnu naplatu licence...";
+    renderBillingState();
+    const checkoutUrl = state.user
+      ? "/api/billing/checkout-session"
+      : "/api/public/billing/checkout-session";
+    const checkoutBody = state.user
+      ? undefined
+      : { email };
+    const result = await api(checkoutUrl, {
+      method: "POST",
+      ...(checkoutBody ? { body: checkoutBody } : {}),
+    });
+    if (!result?.url) {
+      throw new Error("Stripe checkout URL nije dostupan.");
+    }
+    window.location.assign(result.url);
+  } catch (error) {
+    showBillingStatus(error.message);
+  }
+}
+
+function showBillingStatus(message) {
+  if (!elements.paywallPanel?.classList.contains("hidden")) {
+    licenseUiState.error = "";
+    licenseUiState.message = message;
+    renderBillingState();
+    return;
+  }
+
+  if (elements.appShell.classList.contains("hidden")) {
+    elements.authStatus.textContent = message;
+    elements.authStatus.classList.remove("hidden");
+    return;
+  }
+
+  elements.profileStatus.textContent = message;
+  elements.profileStatus.classList.remove("hidden");
 }
 
 function handleDocumentClick(event) {
@@ -489,6 +998,7 @@ function handleDocumentClick(event) {
   const editEquipmentButton = event.target.closest("[data-edit-equipment]");
   const deleteEquipmentButton = event.target.closest("[data-delete-equipment]");
   const homeSearchResult = event.target.closest("[data-home-search-gig]");
+  const financeResult = event.target.closest("[data-open-finance-gig]");
   const clickedQuickMenu = event.target.closest("#quickMenuPanel, #quickMenuToggle");
   const clickedDiary = event.target.closest("#gigDiaryModal .modal-panel, #gigDiaryModal .modal-backdrop");
 
@@ -522,6 +1032,11 @@ function handleDocumentClick(event) {
     return;
   }
 
+  if (financeResult) {
+    openGigDiaryModal(financeResult.dataset.openFinanceGig, { dateFilter: financeResult.dataset.openFinanceGigDate || "" });
+    return;
+  }
+
   if (bandOption) {
     const target = bandOption.dataset.bandTarget === "profile" ? elements.profilePrimaryBandInput : elements.bandName;
     target.value = bandOption.dataset.bandOption;
@@ -541,7 +1056,7 @@ function handleDocumentClick(event) {
   }
 
   if (openGigButton) {
-    openGigFromCalendar(openGigButton.dataset.openGig);
+    openGigFromCalendar(openGigButton.dataset.openGig, openGigButton.dataset.openGigDate || "");
     return;
   }
 
@@ -928,7 +1443,7 @@ function renderCalendar() {
     const firstGigId = dayGigs[0]?.id || "";
 
     html.push(`
-      <article class="${classes}" ${firstGigId ? `data-open-gig="${firstGigId}"` : ""}>
+      <article class="${classes}" ${firstGigId ? `data-open-gig="${firstGigId}" data-open-gig-date="${dateKey}"` : ""}>
         <strong>${date.getDate()}</strong>
         ${dayGigs.length ? `<span class="calendar-day-dot" aria-hidden="true"></span>` : ""}
       </article>
@@ -938,9 +1453,9 @@ function renderCalendar() {
   elements.calendarGrid.innerHTML = html.join("");
 }
 
-function openGigFromCalendar(gigId) {
+function openGigFromCalendar(gigId, dateKey = "") {
   switchTab("nastupi");
-  openGigDiaryModal(gigId);
+  openGigDiaryModal(gigId, { dateFilter: dateKey });
 }
 
 function renderFinanceSummary() {
@@ -977,97 +1492,118 @@ function renderFinanceSummary() {
   document.getElementById("averageRevenue").textContent = formatCurrency(averageRevenue);
 }
 
-function renderMonthlyBreakdown() {
-  if (!state.gigs.length) {
-    elements.monthlyBreakdown.className = "breakdown-table empty-state";
-    elements.monthlyBreakdown.textContent = "Financijski pregled ce se pojaviti nakon prvog upisa nastupa.";
+function handleFinanceYearFilterChange(event) {
+  financeFilterYear = event.target.value;
+  financeFilterMonth = "";
+  renderFinancePeriodFilters();
+  renderFinancePeriodResults();
+}
+
+function handleFinanceMonthFilterChange(event) {
+  financeFilterMonth = event.target.value;
+  renderFinancePeriodResults();
+}
+
+function renderFinancePeriodFilters() {
+  if (!elements.financeYearFilter || !elements.financeMonthFilter) {
     return;
   }
 
-  const months = new Map();
-  state.gigs.forEach((gig) => {
-    const date = parseLocalDate(gig.date);
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    if (!months.has(key)) {
-      months.set(key, {
-        label: capitalize(date.toLocaleDateString("hr-HR", { month: "long", year: "numeric" })),
-        gigs: 0,
-        revenue: 0,
-        completedGigs: 0,
-        advances: 0,
-      });
-    }
+  const years = [...new Set(state.gigs.map((gig) => parseLocalDate(gig.date).getFullYear()))]
+    .sort((a, b) => b - a);
 
-    const month = months.get(key);
-    month.gigs += 1;
-    month.advances += gig.advance;
-    if (gig.netEarning != null) {
-      month.revenue += gig.netEarning;
-      month.completedGigs += 1;
-    }
-  });
+  if (!years.length) {
+    financeFilterYear = "";
+    financeFilterMonth = "";
+    elements.financeYearFilter.innerHTML = `<option value="">Odaberi godinu</option>`;
+    elements.financeMonthFilter.innerHTML = `<option value="">Odaberi mjesec</option>`;
+    elements.financeMonthFilter.disabled = true;
+    return;
+  }
 
-  elements.monthlyBreakdown.className = "breakdown-table";
-  elements.monthlyBreakdown.innerHTML = `
-    <div class="breakdown-row header">
-      <span>Mjesec</span>
-      <span>Nastupi</span>
-      <span>Avansi</span>
-      <span>Zarada</span>
-    </div>
-    ${[...months.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([, month]) => `
-      <div class="breakdown-row">
-        <strong>${month.label}</strong>
-        <span>${month.gigs} nastupa</span>
-        <span>${formatCurrency(month.advances)} avansa</span>
-        <span>${formatCurrency(month.revenue)} zarade (${month.completedGigs})</span>
-      </div>
-    `).join("")}
+  if (financeFilterYear && !years.includes(Number(financeFilterYear))) {
+    financeFilterYear = "";
+  }
+
+  elements.financeYearFilter.innerHTML = `
+    <option value="">Odaberi godinu</option>
+    ${years.map((year) => `<option value="${year}" ${String(year) === financeFilterYear ? "selected" : ""}>${year}</option>`).join("")}
+  `;
+
+  const months = [...new Set(
+    state.gigs
+      .filter((gig) => String(parseLocalDate(gig.date).getFullYear()) === financeFilterYear)
+      .map((gig) => parseLocalDate(gig.date).getMonth() + 1),
+  )].sort((a, b) => a - b);
+
+  if (!financeFilterYear || !months.length) {
+    financeFilterMonth = "";
+    elements.financeMonthFilter.innerHTML = `<option value="">Odaberi mjesec</option>`;
+    elements.financeMonthFilter.disabled = true;
+    return;
+  }
+
+  if (financeFilterMonth && !months.includes(Number(financeFilterMonth))) {
+    financeFilterMonth = "";
+  }
+
+  elements.financeMonthFilter.disabled = false;
+  elements.financeMonthFilter.innerHTML = `
+    <option value="">Odaberi mjesec</option>
+    ${months.map((month) => {
+      const value = String(month).padStart(2, "0");
+      const label = new Date(2026, month - 1, 1).toLocaleDateString("hr-HR", { month: "long" });
+      return `<option value="${value}" ${value === financeFilterMonth ? "selected" : ""}>${capitalize(label)}</option>`;
+    }).join("")}
   `;
 }
 
-function renderBandBreakdown() {
-  if (!state.gigs.length) {
-    elements.bandBreakdown.className = "breakdown-table empty-state";
-    elements.bandBreakdown.textContent = "Pregled po bendovima ce se pojaviti nakon prvog upisa nastupa.";
+function renderFinancePeriodResults() {
+  if (!elements.financePeriodResults) {
     return;
   }
 
-  const bands = new Map();
-  state.gigs.forEach((gig) => {
-    const key = gig.bandName || "Bez benda";
-    if (!bands.has(key)) {
-      bands.set(key, {
-        label: key,
-        gigs: 0,
-        revenue: 0,
-        completedGigs: 0,
-      });
-    }
+  if (!state.gigs.length) {
+    elements.financePeriodResults.className = "breakdown-table empty-state";
+    elements.financePeriodResults.textContent = "Jos nema upisanih nastupa.";
+    return;
+  }
 
-    const band = bands.get(key);
-    band.gigs += 1;
-    if (gig.netEarning != null) {
-      band.revenue += gig.netEarning;
-      band.completedGigs += 1;
-    }
-  });
+  if (!financeFilterYear || !financeFilterMonth) {
+    elements.financePeriodResults.className = "breakdown-table empty-state";
+    elements.financePeriodResults.textContent = "Odaberi godinu i mjesec za prikaz događaja.";
+    return;
+  }
 
-  elements.bandBreakdown.className = "breakdown-table";
-  elements.bandBreakdown.innerHTML = `
+  const visibleGigs = state.gigs
+    .filter((gig) => {
+      const date = parseLocalDate(gig.date);
+      return String(date.getFullYear()) === financeFilterYear
+        && String(date.getMonth() + 1).padStart(2, "0") === financeFilterMonth;
+    })
+    .sort((a, b) => `${a.date} ${a.time || ""}`.localeCompare(`${b.date} ${b.time || ""}`));
+
+  if (!visibleGigs.length) {
+    elements.financePeriodResults.className = "breakdown-table empty-state";
+    elements.financePeriodResults.textContent = "Nema događaja u odabranom periodu.";
+    return;
+  }
+
+  elements.financePeriodResults.className = "breakdown-table";
+  elements.financePeriodResults.innerHTML = `
     <div class="breakdown-row header">
-      <span>Bend</span>
-      <span>Svirke</span>
-      <span>Unesene zarade</span>
-      <span>Ukupna zarada</span>
+      <span>Datum</span>
+      <span>Događaj</span>
+      <span>Avans</span>
+      <span>Zarada</span>
     </div>
-    ${[...bands.values()].sort((a, b) => a.label.localeCompare(b.label, "hr")).map((band) => `
-      <div class="breakdown-row">
-        <strong>${escapeHtml(band.label)}</strong>
-        <span>${band.gigs} svirki</span>
-        <span>${band.completedGigs} unosa</span>
-        <span>${formatCurrency(band.revenue)}</span>
-      </div>
+    ${visibleGigs.map((gig) => `
+      <button type="button" class="breakdown-row breakdown-row-action" data-open-finance-gig="${gig.id}" data-open-finance-gig-date="${gig.date}">
+        <strong>${escapeHtml(formatFullDate(gig.date))}${gig.time ? ` u ${escapeHtml(gig.time)}` : ""}</strong>
+        <span>${escapeHtml(gig.bandName)}${gig.location ? ` - ${escapeHtml(gig.location)}` : ""}</span>
+        <span>${formatCurrency(gig.advance)}</span>
+        <span>${gig.netEarning == null ? "Ceka unos" : formatCurrency(gig.netEarning)}</span>
+      </button>
     `).join("")}
   `;
 }
@@ -1113,6 +1649,8 @@ function renderEquipmentList() {
 }
 
 function renderGoogleCalendarControls() {
+  const hasImportedGoogleGigs = state.gigs.some((gig) => gig.source === "google-import");
+  elements.googleCalendarPanel?.classList.toggle("hidden", hasImportedGoogleGigs);
   elements.googleCalendarSelect.value = state.settings.calendarId || "primary";
   elements.googleDisconnectButton.disabled = !googleCalendarRuntime.accessToken;
   elements.googleImportButton.disabled = !googleCalendarRuntime.accessToken;
@@ -1395,6 +1933,11 @@ async function refreshBandData() {
 }
 
 function switchTab(tabId) {
+  if (!hasProtectedAppAccess()) {
+    renderPaywall();
+    return;
+  }
+
   elements.tabs.forEach((button) => button.classList.toggle("active", button.dataset.tab === tabId));
   elements.panels.forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
   elements.hero?.classList.toggle("hidden", tabId !== "nastupi");
@@ -1477,6 +2020,85 @@ function closeProfilePasswordForm() {
   }
   if (elements.confirmNewPasswordInput) {
     elements.confirmNewPasswordInput.value = "";
+  }
+}
+
+function openClearGigsForm() {
+  elements.clearGigsForm?.classList.remove("hidden");
+  elements.clearGigsPasswordInput?.focus();
+}
+
+function closeClearGigsForm() {
+  elements.clearGigsForm?.classList.add("hidden");
+  if (elements.clearGigsPasswordInput) {
+    elements.clearGigsPasswordInput.value = "";
+  }
+}
+
+async function handleProfileGoogleReconnect() {
+  try {
+    switchTab("nastupi");
+    await handleGoogleConnect();
+  } catch (error) {
+    elements.profileStatus.textContent = error.message;
+    elements.profileStatus.classList.remove("hidden");
+  }
+}
+
+async function handleProfileGoogleImport() {
+  try {
+    switchTab("nastupi");
+    await handleGoogleImport();
+  } catch (error) {
+    elements.profileStatus.textContent = error.message;
+    elements.profileStatus.classList.remove("hidden");
+  }
+}
+
+async function handleClearGigsSubmit(event) {
+  event.preventDefault();
+
+  const password = elements.clearGigsPasswordInput?.value || "";
+  if (!password) {
+    elements.profileStatus.textContent = "Unesite lozinku za potvrdu brisanja.";
+    elements.profileStatus.classList.remove("hidden");
+    return;
+  }
+
+  const confirmed = window.confirm("Jesi siguran da zelis obrisati sve događaje iz kalendara? Ova akcija brise sve nastupe iz aplikacije.");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const result = await api("/api/gigs/clear", {
+      method: "POST",
+      body: { password },
+    });
+    state.gigs = [];
+    activeGigDiaryId = null;
+    gigDiaryDateFilter = "";
+    gigSearchQuery = "";
+    closeClearGigsForm();
+    render();
+    elements.profileStatus.textContent = result?.message || "Svi događaji su obrisani.";
+    elements.profileStatus.classList.remove("hidden");
+  } catch (error) {
+    elements.profileStatus.textContent = error.message;
+    elements.profileStatus.classList.remove("hidden");
+  }
+}
+
+async function handleProfileBackupPdf() {
+  try {
+    const result = await api("/api/gigs");
+    const gigs = Array.isArray(result) ? result : [];
+    openCalendarBackupPrint(gigs);
+    elements.profileStatus.textContent = "Otvoren je backup pregled. U dijalogu za ispis odaberi Save as PDF.";
+    elements.profileStatus.classList.remove("hidden");
+  } catch (error) {
+    elements.profileStatus.textContent = error.message || "Backup PDF nije moguce pripremiti.";
+    elements.profileStatus.classList.remove("hidden");
   }
 }
 
@@ -1563,6 +2185,14 @@ function renderGigDiary() {
   if (elements.homeGigSearchInput && elements.homeGigSearchInput.value !== gigSearchQuery) {
     elements.homeGigSearchInput.value = gigSearchQuery;
   }
+  if (elements.gigDiarySearchRow) {
+    elements.gigDiarySearchRow.classList.toggle("hidden", Boolean(gigDiaryDateFilter));
+  }
+  if (elements.gigDiaryTitle) {
+    elements.gigDiaryTitle.textContent = gigDiaryDateFilter
+      ? `Nastupi za ${formatFullDate(gigDiaryDateFilter)}`
+      : "Pregled svih nastupa";
+  }
 
   if (!state.gigs.length) {
     activeGigDiaryId = null;
@@ -1577,9 +2207,13 @@ function renderGigDiary() {
   if (!visibleGigs.length) {
     activeGigDiaryId = null;
     elements.gigDiaryList.className = "diary-list empty-state";
-    elements.gigDiaryList.textContent = "Nema nastupa koji odgovaraju ovoj pretrazi.";
+    elements.gigDiaryList.textContent = gigDiaryDateFilter
+      ? "Nema nastupa za odabrani dan."
+      : "Nema nastupa koji odgovaraju ovoj pretrazi.";
     elements.gigDiaryDetail.className = "diary-detail empty-state";
-    elements.gigDiaryDetail.textContent = "Promijeni pojam pretrage za prikaz detalja.";
+    elements.gigDiaryDetail.textContent = gigDiaryDateFilter
+      ? "Za ovaj dan nema drugih događaja."
+      : "Promijeni pojam pretrage za prikaz detalja.";
     return;
   }
 
@@ -1649,7 +2283,8 @@ function renderGigDiary() {
   `;
 }
 
-function openGigDiaryModal(gigId = null) {
+function openGigDiaryModal(gigId = null, options = {}) {
+  gigDiaryDateFilter = options.dateFilter || "";
   if (gigId) {
     activeGigDiaryId = gigId;
   }
@@ -1662,6 +2297,7 @@ function openGigDiaryModal(gigId = null) {
 function closeGigDiaryModal() {
   elements.gigDiaryModal?.classList.add("hidden");
   elements.gigDiaryModal?.setAttribute("aria-hidden", "true");
+  gigDiaryDateFilter = "";
 }
 
 function setActiveGigDiary(gigId) {
@@ -1682,12 +2318,20 @@ function handleGigSearchInput(event) {
 }
 
 function getFilteredGigs() {
-  const normalizedQuery = gigSearchQuery.trim().toLocaleLowerCase("hr");
-  if (!normalizedQuery) {
-    return state.gigs;
+  const gigsByDate = gigDiaryDateFilter
+    ? state.gigs.filter((gig) => gig.date === gigDiaryDateFilter)
+    : state.gigs;
+
+  if (gigDiaryDateFilter) {
+    return gigsByDate;
   }
 
-  return state.gigs.filter((gig) => {
+  const normalizedQuery = gigSearchQuery.trim().toLocaleLowerCase("hr");
+  if (!normalizedQuery) {
+    return gigsByDate;
+  }
+
+  return gigsByDate.filter((gig) => {
     const searchable = [
       gig.bandName,
       gig.location,
@@ -1804,7 +2448,7 @@ function openAdvanceReceiptPrint(gig) {
   const eventDate = gig.date ? formatFullDate(gig.date) : "-";
   const eventTime = gig.time || "-";
   const notesBlock = gig.notes ? `<div class="notes"><strong>Napomena:</strong><p>${escapeHtml(gig.notes)}</p></div>` : "";
-  const logoUrl = `${window.location.origin}/logo.jpg`;
+  const logoUrl = `${window.location.origin}/logo_trans.png`;
   const receiptMarkup = `<!DOCTYPE html>
 <html lang="hr">
 <head>
@@ -2027,7 +2671,7 @@ function openAdvanceReceiptPrint(gig) {
 
     <div class="powered-by">
       <span>Powered By:</span>
-      <img src="${escapeAttribute(logoUrl)}" alt="Ctrl Wave logo">
+      <img src="${escapeAttribute(logoUrl)}" alt="Gazza logo">
     </div>
   </main>
 </body>
@@ -2091,6 +2735,378 @@ function openAdvanceReceiptPrint(gig) {
 
   frameDocument.open();
   frameDocument.write(receiptMarkup);
+  frameDocument.close();
+}
+
+function openCalendarBackupPrint(gigs = []) {
+  const ownerName = [state.user?.firstName, state.user?.lastName].filter(Boolean).join(" ").trim() || state.user?.email || "Korisnik";
+  const issueDate = new Date().toLocaleDateString("hr-HR");
+  const logoUrl = `${window.location.origin}/logo_trans.png`;
+  const backupGigs = Array.isArray(gigs) ? gigs : [];
+  const groupedGigs = backupGigs
+    .slice()
+    .sort((a, b) => `${a.date} ${a.time || ""}`.localeCompare(`${b.date} ${b.time || ""}`))
+    .reduce((groups, gig) => {
+      const existing = groups.get(gig.date) || [];
+      existing.push(gig);
+      groups.set(gig.date, existing);
+      return groups;
+    }, new Map());
+
+  const summary = {
+    totalGigs: backupGigs.length,
+    totalAdvance: sum(backupGigs.map((gig) => gig.advance)),
+    totalRevenue: sum(backupGigs.filter((gig) => gig.netEarning != null).map((gig) => gig.netEarning)),
+  };
+
+  const allGigsListMarkup = backupGigs.length
+    ? `
+        <section class="overview-section">
+          <div class="section-title">
+            <h2>Popis svih nastupa</h2>
+            <span>1 red = 1 događaj</span>
+          </div>
+          <div class="overview-table">
+            <div class="overview-row overview-row-header">
+              <span>Datum</span>
+              <span>Vrijeme</span>
+              <span>Bend / događaj</span>
+              <span>Lokacija</span>
+              <span>Ugovaratelj</span>
+              <span>Zarada</span>
+            </div>
+            ${backupGigs.map((gig) => `
+              <div class="overview-row">
+                <strong>${escapeHtml(formatFullDate(gig.date))}</strong>
+                <span>${escapeHtml(gig.time || "-")}</span>
+                <span>${escapeHtml(gig.bandName || "Nastup")}</span>
+                <span>${escapeHtml(gig.location || "-")}</span>
+                <span>${escapeHtml(gig.contractor || "-")}</span>
+                <span>${gig.netEarning == null ? "Čeka unos" : escapeHtml(formatCurrency(gig.netEarning))}</span>
+              </div>
+            `).join("")}
+          </div>
+        </section>
+      `
+    : "";
+
+  const groupsMarkup = groupedGigs.size
+    ? [...groupedGigs.entries()].map(([date, gigs]) => `
+        <section class="day-group">
+          <div class="day-header">
+            <h2>${escapeHtml(formatFullDate(date))}</h2>
+            <span>${gigs.length} događaja</span>
+          </div>
+          <div class="event-list">
+            ${gigs.map((gig) => `
+              <article class="event-card">
+                <div class="event-top">
+                  <strong>${escapeHtml(gig.bandName || "Nastup")}</strong>
+                  <span>${escapeHtml(gig.time || "Bez vremena")}</span>
+                </div>
+                <div class="event-grid">
+                  <div><span>Lokacija</span><strong>${escapeHtml(gig.location || "-")}</strong></div>
+                  <div><span>Ugovaratelj</span><strong>${escapeHtml(gig.contractor || "-")}</strong></div>
+                  <div><span>Kontakt telefon</span><strong>${escapeHtml(gig.contactPhone || "-")}</strong></div>
+                  <div><span>Kontakt email</span><strong>${escapeHtml(gig.contactEmail || "-")}</strong></div>
+                  <div><span>Dogovorena cijena</span><strong>${formatCurrency(gig.fee)}</strong></div>
+                  <div><span>Avans</span><strong>${formatCurrency(gig.advance)}</strong></div>
+                  <div><span>Način plaćanja</span><strong>${escapeHtml(gig.paymentMethod || "-")}</strong></div>
+                  <div><span>Točna zarada</span><strong>${gig.netEarning == null ? "Čeka unos" : formatCurrency(gig.netEarning)}</strong></div>
+                </div>
+                ${gig.notes ? `<p class="notes"><strong>Napomena:</strong> ${escapeHtml(gig.notes)}</p>` : ""}
+              </article>
+            `).join("")}
+          </div>
+        </section>
+      `).join("")
+    : `<section class="empty"><p>Još nema upisanih događaja za backup.</p></section>`;
+
+  const backupMarkup = `<!DOCTYPE html>
+<html lang="hr">
+<head>
+  <meta charset="UTF-8">
+  <title>Gazza backup podataka</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #111827;
+      background: #ffffff;
+    }
+    .sheet {
+      position: relative;
+      min-height: 271mm;
+      padding: 6mm 2mm 12mm;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 8mm;
+    }
+    .brand img {
+      width: 180px;
+      height: auto;
+      display: block;
+      margin-bottom: 10px;
+    }
+    .brand p,
+    .meta,
+    .summary-card span,
+    .event-grid span,
+    .day-header span {
+      color: #667085;
+    }
+    .brand p {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    .meta {
+      text-align: right;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 8mm;
+    }
+    .summary-card {
+      padding: 14px 16px;
+      border: 1px solid #d8dfeb;
+      border-radius: 14px;
+      background: #f8faff;
+    }
+    .summary-card strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 20px;
+      color: #0f172a;
+    }
+    .overview-section {
+      margin-bottom: 10mm;
+    }
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #d8dfeb;
+    }
+    .section-title h2 {
+      margin: 0;
+      font-size: 20px;
+      color: #0f172a;
+    }
+    .section-title span {
+      color: #667085;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .overview-table {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 2mm;
+    }
+    .overview-row {
+      display: grid;
+      grid-template-columns: 1.15fr 0.6fr 1.2fr 1.2fr 1.1fr 0.9fr;
+      gap: 10px;
+      align-items: start;
+      padding: 9px 10px;
+      border: 1px solid #e5eaf2;
+      border-radius: 10px;
+      background: #ffffff;
+      font-size: 12px;
+      line-height: 1.4;
+      break-inside: avoid;
+    }
+    .overview-row-header {
+      background: #f8faff;
+      font-weight: 700;
+      color: #667085;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 11px;
+    }
+    .overview-row strong {
+      color: #0f172a;
+      font-size: 12px;
+    }
+    .day-group {
+      margin-bottom: 7mm;
+      break-inside: avoid;
+    }
+    .day-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #d8dfeb;
+    }
+    .day-header h2 {
+      margin: 0;
+      font-size: 20px;
+      color: #0f172a;
+    }
+    .event-list {
+      display: grid;
+      gap: 10px;
+    }
+    .event-card {
+      padding: 14px 16px;
+      border: 1px solid #d8dfeb;
+      border-radius: 14px;
+      background: #ffffff;
+      break-inside: avoid;
+    }
+    .event-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 15px;
+    }
+    .event-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 14px;
+    }
+    .event-grid div {
+      padding: 8px 0;
+      border-bottom: 1px solid #eef2f7;
+    }
+    .event-grid span {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .event-grid strong {
+      font-size: 14px;
+      color: #0f172a;
+    }
+    .notes {
+      margin: 12px 0 0;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .empty {
+      padding: 18px;
+      border: 1px dashed #c9d4e5;
+      border-radius: 14px;
+      color: #667085;
+    }
+    @media print {
+      .sheet {
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header class="header">
+      <div class="brand">
+        <img src="${escapeAttribute(logoUrl)}" alt="Gazza logo">
+        <p>Backup svih podataka</p>
+      </div>
+      <div class="meta">
+        <div>Datum izrade: <strong>${escapeHtml(issueDate)}</strong></div>
+        <div>Korisnik: <strong>${escapeHtml(ownerName)}</strong></div>
+      </div>
+    </header>
+    <section class="summary">
+      <article class="summary-card">
+        <span>Ukupno događaja</span>
+        <strong>${escapeHtml(String(summary.totalGigs))}</strong>
+      </article>
+      <article class="summary-card">
+        <span>Ukupno avansa</span>
+        <strong>${escapeHtml(formatCurrency(summary.totalAdvance))}</strong>
+      </article>
+      <article class="summary-card">
+        <span>Ukupna zarada</span>
+        <strong>${escapeHtml(formatCurrency(summary.totalRevenue))}</strong>
+      </article>
+    </section>
+    ${allGigsListMarkup}
+    ${groupsMarkup}
+  </main>
+</body>
+</html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+
+  const cleanup = () => {
+    window.setTimeout(() => {
+      iframe.remove();
+    }, 500);
+  };
+
+  iframe.addEventListener("load", () => {
+    const printWindow = iframe.contentWindow;
+    if (!printWindow) {
+      cleanup();
+      window.alert("Backup PDF nije moguce pripremiti.");
+      return;
+    }
+
+    const frameDocument = iframe.contentDocument;
+    const logoImage = frameDocument?.querySelector(".brand img");
+    const triggerPrint = () => {
+      printWindow.focus();
+      printWindow.addEventListener("afterprint", cleanup, { once: true });
+      window.setTimeout(() => {
+        try {
+          printWindow.print();
+        } catch {
+          cleanup();
+        }
+      }, 150);
+    };
+
+    if (logoImage && !logoImage.complete) {
+      logoImage.addEventListener("load", triggerPrint, { once: true });
+      logoImage.addEventListener("error", triggerPrint, { once: true });
+      return;
+    }
+
+    triggerPrint();
+  }, { once: true });
+
+  document.body.appendChild(iframe);
+
+  const frameDocument = iframe.contentDocument;
+  if (!frameDocument) {
+    iframe.remove();
+    throw new Error("Backup dokument nije moguce otvoriti.");
+  }
+
+  frameDocument.open();
+  frameDocument.write(backupMarkup);
   frameDocument.close();
 }
 
@@ -2180,6 +3196,18 @@ function formatCurrency(amount) {
   }).format(amount || 0);
 }
 
+function formatDateShort(value) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Date(value).toLocaleDateString("hr-HR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
 function getWeekNumber(date) {
   const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const day = target.getUTCDay() || 7;
@@ -2245,6 +3273,22 @@ async function api(url, options = {}) {
   if (!response.ok) {
     const error = new Error(payload?.error || "Zahtjev nije uspio.");
     error.statusCode = response.status;
+    if (payload?.billing) {
+      error.billing = payload.billing;
+    }
+    if (response.status === 402) {
+      if (payload?.billing) {
+        state.billing = payload.billing;
+        if (state.user) {
+          state.user.billing = payload.billing;
+        }
+      }
+      licenseUiState.loading = false;
+      licenseUiState.error = error.message;
+      if (state.user) {
+        renderPaywall();
+      }
+    }
     throw error;
   }
   return payload;

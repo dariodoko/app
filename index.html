@@ -2,25 +2,41 @@
 <html lang="hr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gazza manager</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Gazza manager - Upravljaj nastupima, financijama i opremom na jednom mjestu! </title>
   <meta name="theme-color" content="#171b23">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Gazza Manager">
+  <meta name="format-detection" content="telephone=no, date=no, email=no, address=no">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon-192.png" type="image/png">
-  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="icon" href="/ikona_plava_transparent.png" type="image/png">
+  <link rel="apple-touch-icon" href="/ikona_plava_transparent.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div class="app-launch-screen" id="appLaunchScreen" aria-hidden="true">
+    <div class="app-launch-orb"></div>
+    <div class="app-launch-card">
+      <img class="app-launch-mark" src="/ikona_bijela_transparent.png" alt="Gazza ikona">
+      <img class="app-launch-logo" src="/logo_trans.png" alt="Gazza logo">
+      <p class="app-launch-copy">Osobni dnevnik glazbenika</p>
+      <div class="app-launch-progress" aria-hidden="true">
+        <span></span>
+      </div>
+      <p class="app-launch-status" id="appLaunchStatus">Pokretanje aplikacije...</p>
+    </div>
+  </div>
+
   <div class="auth-shell" id="authShell">
     <section class="auth-panel">
+      <img class="auth-brand-logo" src="/logo_trans.png" alt="Gazza logo">
       <div class="auth-panel-copy">
-        <p class="eyebrow">Prijava</p>
-        <h2 id="authTitle">Prijavi se u glazbeni dnevnik</h2>
-        <p class="auth-copy">
-          Svaki korisnik ima svoj racun, svoje nastupe, financije i opremu.
+        <p class="eyebrow" id="authEyebrow">Račun</p>
+        <h2 id="authTitle">Prijavi se ili registriraj</h2>
+        <p class="auth-copy" id="authIntroCopy">
+          Prijavi se i vodi računa o svim svojim nastupima, financijama, prodaji i kupnji opreme...
         </p>
       </div>
       <form id="authForm" class="form-grid">
@@ -50,7 +66,7 @@
         </label>
         <div class="full-width auth-actions">
           <button type="submit" id="authSubmitButton" class="primary-button">Prijava</button>
-          <button type="button" id="authToggleMode" class="ghost-button">Nemam racun</button>
+          <button type="button" id="authToggleMode" class="ghost-button">Nemam račun</button>
         </div>
         <div class="full-width auth-secondary-actions">
           <button type="button" id="forgotPasswordButton" class="text-button">Zaboravljena lozinka?</button>
@@ -58,33 +74,101 @@
         </div>
       </form>
       <p id="authStatus" class="google-calendar-status">Prijavi se za nastavak.</p>
+      <section id="authBillingPanel" class="billing-panel billing-panel-auth hidden">
+        <div class="billing-copy">
+          <p class="eyebrow">Licenca</p>
+          <h3 id="authBillingTitle">Jedan email, jedan račun i jedna licenca</h3>
+          <p id="authBillingMessage" class="auth-copy billing-copy-text">
+            Novi korisnici ispunjavaju podatke i nastavljaju na plaćanje, a postojeći se samo prijavljuju ili po potrebi aktiviraju licencu.
+          </p>
+        </div>
+        <div class="billing-actions">
+          <button type="button" id="authStartCheckoutButton" class="primary-button hidden">Kupi licencu 25,00 EUR</button>
+        </div>
+      </section>
       <div class="auth-footer">
-        <span>Osobni dnevnik glazbenika sa sigurnim pristupom svim nastupima, financijama i opremom.</span>
+        <span>Siguran i pregledan sustav za evidenciju nastupa, prihoda i opreme.</span>
+      </div>
+    </section>
+
+    <section class="auth-panel paywall-panel hidden" id="paywallPanel">
+      <div class="auth-panel-copy">
+        <p class="eyebrow">Licenca</p>
+        <h2 id="paywallTitle">Dovrši aktivaciju licence</h2>
+        <p id="paywallMessage" class="auth-copy">
+          Licenca se aktivira za email s kojim si se prijavio ili registrirao.
+        </p>
+      </div>
+      <section class="billing-panel billing-panel-auth">
+        <div class="billing-copy">
+          <p class="eyebrow">Status provjere</p>
+          <p id="paywallStatus" class="auth-copy billing-copy-text">Provjeravamo status licence...</p>
+        </div>
+        <div class="billing-actions">
+          <button type="button" id="paywallCheckoutButton" class="primary-button">Kupi licencu 25,00 EUR</button>
+          <button type="button" id="paywallLogoutButton" class="text-button">Odjavi se</button>
+        </div>
+      </section>
+      <div class="auth-footer">
+        <span id="paywallFooter">Pristup aplikaciji otkljucava se nakon uspjesne aktivacije licence.</span>
       </div>
     </section>
   </div>
 
   <div class="app-shell hidden" id="appShell">
     <aside class="app-sidebar" aria-label="Bocna navigacija">
+      <img class="sidebar-brand-mark" src="/ikona_bijela_transparent.png" alt="Gazza ikona">
       <nav class="sidebar-nav">
         <button class="sidebar-tab tab-button active" data-tab="nastupi" aria-label="Nastupi">
           <span class="sidebar-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M4 6.5h16M4 12h16M4 17.5h16" />
+              <rect x="4" y="5" width="16" height="14" rx="3" />
+              <path d="M9 5v14" />
+              <path d="M12 10h4" />
+              <path d="M12 14h4" />
             </svg>
           </span>
         </button>
         <button class="sidebar-tab tab-button" data-tab="financije" aria-label="Financije">
           <span class="sidebar-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M6 17V11M12 17V7M18 17V13" />
+              <path d="M16.5 6.5a6.5 6.5 0 1 0 0 11" />
+              <path d="M6 10h8" />
+              <path d="M6 14h8" />
             </svg>
           </span>
         </button>
         <button class="sidebar-tab tab-button" data-tab="oprema" aria-label="Oprema">
           <span class="sidebar-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M6 7h12v10H6zM9 7V5h6v2" />
+              <path d="M4.5 7.5h3v9h-3z" />
+              <path d="M16.5 7.5h3v9h-3z" />
+              <path d="M7.5 8.5 16.5 7.5" />
+              <path d="M7.5 15.5 16.5 16.5" />
+              <path d="M7.5 8.5v7" />
+              <path d="M9.3 8.3v7.4" />
+              <path d="M11.1 8.1v7.8" />
+              <path d="M12.9 7.9v8.2" />
+              <path d="M14.7 7.7v8.6" />
+              <path d="M6 10.2h0" />
+              <path d="M6 13.8h0" />
+              <path d="M18 10.2h0" />
+              <path d="M18 13.8h0" />
+            </svg>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-tab"
+          data-tab-target="nastupi"
+          data-jump-section="gigForm"
+          aria-label="Dodaj događaj"
+          title="Dodaj događaj"
+        >
+          <span class="sidebar-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
             </svg>
           </span>
         </button>
@@ -112,7 +196,7 @@
             <path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.2 11.2 11.2 0 0 0 3.5.6 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.2a1 1 0 0 1 1 1 11.2 11.2 0 0 0 .6 3.5 1 1 0 0 1-.2 1z" />
           </svg>
         </a>
-        <img class="sidebar-logo" src="/logo.jpg" alt="Ctrl Wave logo">
+        <img class="sidebar-logo" src="/logo_trans.png" alt="Gazza logo">
       </div>
     </aside>
 
@@ -120,17 +204,30 @@
       <section class="user-bar">
         <div class="user-bar-copy">
           <p class="eyebrow">Gazza manager</p>
-          <h1>Dobrodosao natrag.</h1>
-          <p class="hero-copy">Prati nastupe, zaradu i opremu iz jednog preglednog dashboarda.</p>
+          <h1>Dobrodošao u Gazzu!</h1>
+          <p class="hero-copy">Prati svoje nastupe, zaradu i opremu iz jednog preglednog dashboarda.</p>
         </div>
         <div class="user-bar-actions">
           <button type="button" class="account-chip account-chip-link" data-tab-target="profil" aria-label="Otvori korisnicki profil">
             <span class="account-avatar" id="currentUserInitial">G</span>
             <div class="account-copy">
-              <p class="eyebrow">Korisnički racun</p>
+              <p class="eyebrow">Korisnički račun</p>
               <strong id="currentUserName">-</strong>
               <span id="currentUserBand" class="account-subtitle">-</span>
             </div>
+          </button>
+          <button
+            type="button"
+            class="icon-button user-bar-add-button"
+            data-tab-target="nastupi"
+            data-jump-section="gigForm"
+            aria-label="Dodaj novi događaj"
+            title="Dodaj novi događaj"
+          >
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
           </button>
           <button type="button" id="logoutButton" class="danger-button small-button">Odjava</button>
         </div>
@@ -139,7 +236,7 @@
       <header class="hero">
         <div class="hero-intro">
           <span class="hero-badge">Osobni dnevnik glazbenika</span>
-          <h2>Glazbeni pregled, planiranje i unos u jednom modernom workspaceu.</h2>
+          <h2>Pregled nastupa, planiranje, zarada, prodaji i kupnji opreme.</h2>
           <p class="hero-copy">
             Uredi raspored svirki, financijsku sliku i opremu bez tablica i bez gubljenja pregleda nad detaljima.
           </p>
@@ -173,7 +270,7 @@
             <input type="search" id="homeGigSearchInput" placeholder="Pretrazi po bendu, lokaciji, ugovaratelju, kontaktu, napomeni ili datumu">
           </div>
           <div id="homeGigSearchResults" class="home-gig-results empty-state">
-            Upisi pojam za pretragu nastupa.
+            Upiši pojam za pretragu nastupa.
           </div>
         </section>
 
@@ -181,7 +278,7 @@
           <div class="section-heading inline-actions">
             <div>
               <p class="eyebrow">Kalendar</p>
-              <h2>Mjesecni pregled nastupa</h2>
+              <h2>Mjesečni pregled nastupa</h2>
             </div>
             <div class="month-switcher">
               <button id="prevMonth" class="icon-button" type="button" aria-label="Prethodni mjesec">&lt;</button>
@@ -203,31 +300,31 @@
           <section class="google-calendar-panel" aria-labelledby="googleCalendarTitle">
             <div class="section-heading compact-heading">
               <div>
-                <p class="eyebrow">Google Calendar</p>
-                <h3 id="googleCalendarTitle">Povezi Google racun</h3>
+                <p class="eyebrow">Google kalendar</p>
+                <h3 id="googleCalendarTitle">Poveži Google račun</h3>
               </div>
             </div>
             <div class="google-calendar-grid">
               <div class="full-width google-client-lock">
-                Google Calendar koristi zajednicki OAuth klijent aplikacije.
+                Google Calendar koristi zajednički OAuth klijent aplikacije.
               </div>
               <label class="full-width">
                 Kalendar
                 <select id="googleCalendarSelect">
-                  <option value="primary">Primary calendar</option>
+                  <option value="primary">Osnovni kalendar</option>
                 </select>
               </label>
             </div>
             <p class="form-hint">
-              Aplikacija samo cita nastupe iz tvog Google Kalendara. Nista iz ove aplikacije ne mijenja Google evente.
+              Aplikacija samo čita nastupe iz tvog Google Kalendara. Ništa iz ove aplikacije ne mijenja Google događaje i podatke.
             </p>
             <p id="googleCalendarStatus" class="google-calendar-status">
               Google Calendar nije povezan.
             </p>
             <div class="form-actions">
-              <button type="button" id="googleConnectButton" class="primary-button">Povezi Google Calendar</button>
+              <button type="button" id="googleConnectButton" class="primary-button">Poveži Google Calendar</button>
               <button type="button" id="googleDisconnectButton" class="ghost-button">Odspoji</button>
-              <button type="button" id="googleImportButton" class="ghost-button">Ucitaj nastupe</button>
+              <button type="button" id="googleImportButton" class="ghost-button">Učitaj nastupe</button>
             </div>
           </section>
         </section>
@@ -293,7 +390,7 @@
               Nacin placanja
               <select id="paymentMethod" required>
                 <option value="Gotovina">Gotovina</option>
-                <option value="Racun">Racun</option>
+                <option value="Korisnički račun"></option>
               </select>
             </label>
             <label>
@@ -301,11 +398,11 @@
               <input type="number" id="gigNetEarning" min="0" step="0.01" placeholder="Unos nakon nastupa">
             </label>
             <p id="gigNetEarningHint" class="form-hint full-width">
-              Tocna zarada moze se unijeti tek nakon sto datum nastupa prodje.
+              Točna zarada može se unijeti tek nakon što datum nastupa prođe.
             </p>
             <label class="full-width">
-              Biljeska
-              <textarea id="gigNotes" rows="4" placeholder="Kratka biljeska o svirci, setu, atmosferi ili dogovoru..."></textarea>
+              Bilješke
+              <textarea id="gigNotes" rows="4" placeholder="Kratka bilješka o svirci, setu, atmosferi ili dogovoru..."></textarea>
             </label>
             <div class="full-width form-actions">
               <button type="submit" id="gigSubmitButton" class="primary-button">Spremi nastup</button>
@@ -361,7 +458,7 @@
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Naplate</p>
-                <h2>Pregled po nacinu placanja</h2>
+                <h2>Pregled po načinu plaćanja</h2>
               </div>
             </div>
             <div class="metric-grid">
@@ -370,7 +467,7 @@
                 <strong id="cashRevenue">0 EUR</strong>
               </article>
               <article class="metric-card">
-                <span>Racun</span>
+                <span>Račun</span>
                 <strong id="bankRevenue">0 EUR</strong>
               </article>
               <article class="metric-card">
@@ -388,24 +485,35 @@
         <section class="panel" id="financeBreakdownSection">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Zarada po mjesecima</p>
-                <h2>Mjesecna statistika</h2>
+              <p class="eyebrow">Odabir razdoblja</p>
+                <h2>Mjesečna statistika</h2>
             </div>
           </div>
-          <div id="monthlyBreakdown" class="breakdown-table empty-state">
-            Financijski pregled ce se pojaviti nakon prvog upisa nastupa.
+          <div class="form-grid">
+            <label>
+              Godina
+              <select id="financeYearFilter">
+                <option value="">Odaberi godinu</option>
+              </select>
+            </label>
+            <label>
+              Mjesec
+              <select id="financeMonthFilter" disabled>
+                <option value="">Odaberi mjesec</option>
+              </select>
+            </label>
           </div>
         </section>
 
         <section class="panel" id="financeBandsSection">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Pregled po bendu</p>
-              <h2>Svirke i zarada po bendovima</h2>
+              <p class="eyebrow">Događaji</p>
+              <h2>Rezultati za odabrani period</h2>
             </div>
           </div>
-          <div id="bandBreakdown" class="breakdown-table empty-state">
-            Pregled po bendovima ce se pojaviti nakon prvog upisa nastupa.
+          <div id="financePeriodResults" class="breakdown-table empty-state">
+            Odaberi godinu i mjesec za prikaz događaja.
           </div>
         </section>
       </section>
@@ -415,14 +523,14 @@
           <div>
             <p class="eyebrow">Oprema</p>
             <h2>Kupnja, prodaja i stanje opreme.</h2>
-            <p class="hero-copy">Biljezi instrumente, pregledaj neto rezultat i drzi sve unose opreme uredno na jednom mjestu.</p>
+            <p class="hero-copy">Prati kupnju i prodaju opreme i drži sve podatke na sigurnom mjestu.</p>
           </div>
         </section>
         <div class="layout-grid">
           <section class="panel accent-panel" id="equipmentFormSection">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Instrumenti i oprema</p>
+                <p class="eyebrow">Oprema</p>
                 <h2>Unos kupnje i prodaje</h2>
               </div>
             </div>
@@ -448,12 +556,12 @@
                 <input type="number" id="equipmentPrice" min="0" step="0.01" placeholder="0.00" required>
               </label>
               <label class="full-width">
-                Biljeska
+                Bilješke
                 <textarea id="equipmentNotes" rows="3" placeholder="Stanje, kupac, servis, detalji oglasa..."></textarea>
               </label>
               <div class="full-width form-actions">
                 <button type="submit" id="equipmentSubmitButton" class="primary-button">Spremi opremu</button>
-                <button type="reset" class="ghost-button">Ocisti formu</button>
+                <button type="reset" class="ghost-button">Očisti formu</button>
                 <button type="button" id="equipmentCancelEditButton" class="ghost-button hidden">Odustani od uredjivanja</button>
               </div>
             </form>
@@ -491,7 +599,7 @@
             </div>
           </div>
           <div id="equipmentList" class="card-list empty-state">
-            Jos nema unosa opreme.
+            Još nema unosa opreme.
           </div>
         </section>
       </section>
@@ -501,7 +609,7 @@
           <div>
             <p class="eyebrow">Moj profil</p>
             <h2>KORISNIČKI PANEL</h2>
-            <p class="hero-copy">Pregledaj aktivni racun, status workspacea i osnovne informacije vezane uz tvoj profil.</p>
+            <p class="hero-copy">Pregledaj svoj račun, status workspacea i osnovne informacije vezane uz tvoj profil.</p>
           </div>
         </section>
         <div class="layout-grid profile-layout">
@@ -509,14 +617,14 @@
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Moj profil</p>
-                <h2>Korisnicki panel</h2>
+                <h2>Korisnički panel</h2>
               </div>
             </div>
             <div class="profile-card">
               <div class="profile-avatar-large">G</div>
               <div class="profile-copy">
                 <strong id="profileUserEmail">-</strong>
-                <p class="meta">Aktivni korisnicki racun za upravljanje nastupima, financijama i opremom.</p>
+                <p class="meta">Aktivni korisnički račun za upravljanje nastupima, financijama i opremom.</p>
               </div>
             </div>
             <form id="profileForm" class="form-grid profile-form">
@@ -550,7 +658,7 @@
                 <div class="full-width form-actions">
                   <button type="submit" class="primary-button">Spremi podatke</button>
                   <button type="button" id="changePasswordToggleButton" class="ghost-button">Izmijeni lozinku</button>
-                  <button type="button" id="deleteAccountButton" class="danger-button">Obrisi racun</button>
+                  <button type="button" id="deleteAccountButton" class="danger-button">Obrisi račun</button>
                 </div>
               </form>
             <form id="profilePasswordForm" class="form-grid profile-password-form hidden">
@@ -571,14 +679,91 @@
                 <button type="button" id="cancelPasswordChangeButton" class="ghost-button">Odustani</button>
               </div>
             </form>
+            <section class="profile-utility-panel">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Backup</p>
+                  <h3>Izvoz podataka</h3>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="profileBackupPdfButton" class="ghost-button">Backup svih podataka (PDF)</button>
+              </div>
+            </section>
+            <section class="profile-utility-panel">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Google kalendar</p>
+                  <h3>Diskretne akcije</h3>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="profileGoogleReconnectButton" class="ghost-button">Ponovno poveži Google</button>
+                <button type="button" id="profileGoogleImportButton" class="ghost-button">Uvezi Google nastupe</button>
+              </div>
+            </section>
+            <section class="profile-utility-panel">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Sigurnost kalendara</p>
+                  <h3>Brisanje svih događaja</h3>
+                </div>
+              </div>
+              <p class="meta">Ova akcija briše sve nastupe iz aplikacije i traži potvrdu lozinkom.</p>
+              <div class="form-actions">
+                <button type="button" id="showClearGigsFormButton" class="danger-button">Obriši sve događaje</button>
+              </div>
+              <form id="clearGigsForm" class="form-grid profile-password-form hidden">
+                <label class="full-width">
+                  Potvrdi lozinkom
+                  <input type="password" id="clearGigsPasswordInput" placeholder="Unesite lozinku za potvrdu">
+                </label>
+                <div class="full-width form-actions">
+                  <button type="submit" class="danger-button">Potvrdi brisanje</button>
+                  <button type="button" id="cancelClearGigsButton" class="ghost-button">Odustani</button>
+                </div>
+              </form>
+            </section>
             <p id="profileStatus" class="google-calendar-status hidden"></p>
+            <section class="billing-panel profile-billing-panel" id="profileBillingPanel">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Naplata</p>
+                  <h3 id="profileBillingTitle">Licenca na 1 godinu</h3>
+                </div>
+              </div>
+              <p id="profileBillingMessage" class="hero-copy billing-copy-text">
+                Kupnja licence otključava 1 godinu pristupa aplikaciji.
+              </p>
+              <div class="detail-grid profile-detail-grid">
+                <article class="detail-item">
+                  <span>Status</span>
+                  <strong id="profileBillingStatus">Trial</strong>
+                </article>
+                <article class="detail-item">
+                  <span>Vrijedi do</span>
+                  <strong id="profileBillingEndsAt">-</strong>
+                </article>
+                <article class="detail-item">
+                  <span>Cijena</span>
+                  <strong id="profileBillingPrice">-</strong>
+                </article>
+                <article class="detail-item">
+                  <span>Stripe sigurno plaćanje</span>
+                  <strong id="profileBillingStripeStatus">Nije konfiguriran</strong>
+                </article>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="profileStartCheckoutButton" class="primary-button">Kupi licencu 25,00 EUR</button>
+              </div>
+            </section>
             <div class="detail-grid profile-detail-grid">
               <article class="detail-item">
-                <span>Status racuna</span>
+                <span>Status računa</span>
                 <strong>Aktivan</strong>
               </article>
               <article class="detail-item">
-                <span>Google Calendar</span>
+                <span>Google kalendar</span>
                 <strong>Povezivanje u aplikaciji</strong>
               </article>
               <article class="detail-item">
@@ -621,7 +806,7 @@
           <section class="panel">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Brzi pregled nastupa</p>
+                <p class="eyebrow">Brži pregled nastupa</p>
                 <h2>Što je trenutno najvaznije</h2>
               </div>
             </div>
@@ -664,12 +849,13 @@
         <input type="search" id="gigSearchInput" placeholder="Pretrazi po bendu, lokaciji, ugovaratelju, kontaktu, napomeni ili datumu">
       </div>
       <div class="diary-modal-layout">
-        <div id="gigDiaryList" class="diary-list empty-state">Jos nema upisanih nastupa.</div>
+        <div id="gigDiaryList" class="diary-list empty-state">Još nema upisanih nastupa.</div>
         <div id="gigDiaryDetail" class="diary-detail empty-state">Odaberi nastup za detalje.</div>
       </div>
     </section>
   </div>
 
+  <script src="license-service.js"></script>
   <script src="app.js"></script>
   <script async defer src="https://accounts.google.com/gsi/client" onload="googleIdentityLoaded()"></script>
 </body>

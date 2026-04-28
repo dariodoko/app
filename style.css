@@ -373,6 +373,12 @@ body::after {
   gap: 16px;
 }
 
+.form-grid > *,
+label,
+.autocomplete {
+  min-width: 0;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -393,6 +399,8 @@ input,
 select,
 textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 15px 16px;
   border-radius: 16px;
   border: 1px solid var(--line);
@@ -430,6 +438,44 @@ textarea:focus {
 
 textarea {
   resize: vertical;
+}
+
+input[type="date"],
+input[type="time"] {
+  display: block;
+  inline-size: 100%;
+  block-size: 54px;
+  overflow: hidden;
+  -webkit-appearance: none;
+  appearance: none;
+  padding-inline: 14px;
+}
+
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-width: 0;
+}
+
+input[type="date"]::-webkit-datetime-edit,
+input[type="time"]::-webkit-datetime-edit {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+}
+
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="time"]::-webkit-datetime-edit-fields-wrapper {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 .full-width {

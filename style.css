@@ -173,12 +173,19 @@ body::after {
 }
 
 .auth-shell {
+  width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   align-content: center;
   justify-items: center;
   padding: 24px;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(74, 123, 255, 0.14), transparent 18%),
+    radial-gradient(circle at 82% 0%, rgba(163, 177, 255, 0.1), transparent 20%),
+    linear-gradient(180deg, #0e111a 0%, #121827 52%, #141b2b 100%);
 }
 
 .auth-shell::before {
@@ -193,6 +200,20 @@ body::after {
   background: radial-gradient(circle, rgba(196, 205, 224, 0.16), rgba(83, 97, 128, 0.08) 42%, transparent 72%);
   filter: blur(28px);
   pointer-events: none;
+}
+
+.auth-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(transparent 8%, black 28%, black 74%, transparent 100%);
+  opacity: 0.16;
 }
 
 .auth-panel,

@@ -464,7 +464,7 @@ function renderAuthMode() {
   }
   if (elements.authIntroCopy) {
     elements.authIntroCopy.textContent = isLogin
-      ? "Prijavi se i vodi evidenciju o svim svojim nastupima, financijama, prodaji i kupnji opreme..."
+      ? "Dobrodošli u aplikaciju za glazbenike koja objedinjuje sve što vam je potrebno na jednom mjestu."
       : isRegister
         ? "Račun i licenca bit ce povezani s emailom koji upisujes u ovoj formi."
         : isForgot
@@ -869,20 +869,20 @@ function renderBillingState() {
   const billing = getBillingSnapshot();
   const licenseState = licenseApi.getLicenseState(billing);
   const title = billing.licenseActive
-    ? "Godisnja licenca je aktivna"
+    ? "Godišnja licenca je aktivna"
     : licenseState === "expired"
       ? "Licenca je istekla"
       : "Licenca nije aktivna";
   const message = billing.licenseActive
-    ? `Tvoj račun ima aktivnu godisnju licencu${billing.licenseExpiresAt ? `, vrijedi do ${formatDateShort(billing.licenseExpiresAt)}.` : "."}`
+    ? `Tvoj račun ima aktivnu godišnju licencu${billing.licenseExpiresAt ? `, vrijedi do ${formatDateShort(billing.licenseExpiresAt)}.` : "."}`
     : billing.stripeEnabled
       ? `Pristup aplikaciji aktiviras kupnjom licence na 1 godinu za ${billing.priceLabel}. Naplata je vezana uz email s kojim si se prijavio ili registrirao.`
       : "Online naplata trenutno nije dostupna jer Stripe jos nije konfiguriran na serveru.";
   const statusLabel = billing.licenseActive
-    ? "Godisnja licenca"
+    ? "Godišnja licenca"
     : licenseState === "expired"
       ? "Istekla licenca"
-      : "Ceka uplatu";
+      : "Čeka uplatu";
   const paywallStatus = licenseUiState.loading
     ? "Provjeravamo status licence..."
     : licenseUiState.error
@@ -897,7 +897,7 @@ function renderBillingState() {
 
   elements.authBillingPanel?.classList.remove("hidden");
   if (elements.authBillingTitle) {
-    elements.authBillingTitle.textContent = "Jedan email, jedan racun i jedna licenca";
+    elements.authBillingTitle.textContent = "Jedan email, jedan račun i jedna licenca";
   }
   if (elements.authBillingMessage) {
     elements.authBillingMessage.textContent = "Novi korisnici ispunjavaju podatke jednom i nastavljaju na placanje, a postojeci se prijavljuju i po potrebi aktiviraju licencu.";
